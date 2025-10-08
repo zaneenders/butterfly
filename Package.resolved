@@ -1,13 +1,13 @@
 {
-  "originHash" : "3806e2ab10682e37750a9fc0d0bc2f910cbc0b8452c3f588c84a87d24c8a81df",
+  "originHash" : "9d68370a31321f40e9ac9150113beb9df087128d11002f26263da44985523650",
   "pins" : [
     {
       "identity" : "git-commit-hash-plugin",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/zaneenders/git-commit-hash-plugin.git",
       "state" : {
-        "revision" : "1d388eeed78f3438fd37b66e672d9d7cc4ca6407",
-        "version" : "0.0.1"
+        "revision" : "e7854228bcca130cd1ef7bb4ecb4bdc861db7a68",
+        "version" : "0.0.2"
       }
     },
     {
