@@ -14,12 +14,14 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-log.git", branch: "main"),
         .package(url: "https://github.com/zaneenders/git-commit-hash-plugin.git", from: "0.0.2"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.21.0"),
     ],
     targets: [
         .target(
             name: "Butterfly",
             dependencies: [
                 .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "Logging", package: "swift-log"),
             ], swiftSettings: swiftSettings,
             plugins: [

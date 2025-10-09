@@ -1,6 +1,7 @@
 import Logging
 import NIOCore
 import NIOPosix
+import NIOSSL
 
 struct Client: Sendable {
 
@@ -25,8 +26,9 @@ struct Client: Sendable {
         sends all the commands then shuts down or something.
         */
         do {
-            let channel: NIOAsyncChannel<ButterflyCommand, ButterflyCommand> = try await Client.connect(
-                host: host, port: port, logger: logger)
+            let channel: NIOAsyncChannel<ButterflyCommand, ButterflyCommand> =
+                try await Client.connect(
+                    host: host, port: port, logger: logger)
             return try await channel.executeThenClose {
                 inbound,
                 outbound in
@@ -51,10 +53,19 @@ struct Client: Sendable {
         let group: MultiThreadedEventLoopGroup = .singleton
         let bootstrap: NIOAsyncChannel<ButterflyCommand, ButterflyCommand>
         do {
+            var tlsConfig = TLSConfiguration.makeClientConfiguration()
+            tlsConfig.certificateVerification = .none  // TODO: delete
+            let sslContext = try NIOSSLContext(configuration: tlsConfig)
+
             bootstrap = try await ClientBootstrap(group: group)
-                .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+                .channelOption(
+                    ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1
+                )
                 .connect(host: host, port: port) { channel in
                     channel.eventLoop.makeCompletedFuture {
+                        try channel.pipeline.syncOperations.addHandler(
+                            try NIOSSLClientHandler(context: sslContext, serverHostname: host)
+                        )
                         try channel.pipeline.syncOperations.addHandler(
                             ByteToMessageHandler(BufferCoder(logger: logger)))
                         try channel.pipeline.syncOperations.addHandler(
