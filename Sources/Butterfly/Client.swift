@@ -54,7 +54,9 @@ struct Client: Sendable {
         let bootstrap: NIOAsyncChannel<ButterflyCommand, ButterflyCommand>
         do {
             var tlsConfig = TLSConfiguration.makeClientConfiguration()
-            tlsConfig.certificateVerification = .none  // TODO: delete
+            let caCerts = try NIOSSLCertificate.fromPEMFile("cert.pem")
+            tlsConfig.trustRoots = .certificates(caCerts)
+            tlsConfig.certificateVerification = .fullVerification
             let sslContext = try NIOSSLContext(configuration: tlsConfig)
 
             bootstrap = try await ClientBootstrap(group: group)
