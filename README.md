@@ -2,6 +2,12 @@
 
 ## Testing
 
+Run the test with SSL enabled
+
+```
+swift test --traits SSL
+```
+
 View test coverage
 
 ```console
