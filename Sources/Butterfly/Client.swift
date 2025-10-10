@@ -1,7 +1,10 @@
 import Logging
 import NIOCore
 import NIOPosix
-import NIOSSL
+
+#if SSL
+    import NIOSSL
+#endif
 
 struct Client: Sendable {
 
@@ -53,11 +56,13 @@ struct Client: Sendable {
         let group: MultiThreadedEventLoopGroup = .singleton
         let bootstrap: NIOAsyncChannel<ButterflyCommand, ButterflyCommand>
         do {
-            var tlsConfig = TLSConfiguration.makeClientConfiguration()
-            let caCerts = try NIOSSLCertificate.fromPEMFile("cert.pem")
-            tlsConfig.trustRoots = .certificates(caCerts)
-            tlsConfig.certificateVerification = .fullVerification
-            let sslContext = try NIOSSLContext(configuration: tlsConfig)
+            #if SSL
+                var tlsConfig = TLSConfiguration.makeClientConfiguration()
+                let caCerts = try NIOSSLCertificate.fromPEMFile("cert.pem")
+                tlsConfig.trustRoots = .certificates(caCerts)
+                tlsConfig.certificateVerification = .fullVerification
+                let sslContext = try NIOSSLContext(configuration: tlsConfig)
+            #endif
 
             bootstrap = try await ClientBootstrap(group: group)
                 .channelOption(
@@ -65,9 +70,11 @@ struct Client: Sendable {
                 )
                 .connect(host: host, port: port) { channel in
                     channel.eventLoop.makeCompletedFuture {
-                        try channel.pipeline.syncOperations.addHandler(
-                            try NIOSSLClientHandler(context: sslContext, serverHostname: host)
-                        )
+                        #if SSL
+                            try channel.pipeline.syncOperations.addHandler(
+                                try NIOSSLClientHandler(context: sslContext, serverHostname: host)
+                            )
+                        #endif
                         try channel.pipeline.syncOperations.addHandler(
                             ByteToMessageHandler(BufferCoder(logger: logger)))
                         try channel.pipeline.syncOperations.addHandler(

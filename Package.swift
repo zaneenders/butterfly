@@ -10,6 +10,9 @@ let package = Package(
             targets: ["Butterfly"]
         )
     ],
+    traits: [
+        .trait(name: "SSL", description: "Enable SSL")
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-log.git", branch: "main"),
@@ -21,7 +24,9 @@ let package = Package(
             name: "Butterfly",
             dependencies: [
                 .product(name: "NIO", package: "swift-nio"),
-                .product(name: "NIOSSL", package: "swift-nio-ssl"),
+                .product(
+                    name: "NIOSSL", package: "swift-nio-ssl",
+                    condition: .when(traits: ["SSL"])),
                 .product(name: "Logging", package: "swift-log"),
             ], swiftSettings: swiftSettings,
             plugins: [
