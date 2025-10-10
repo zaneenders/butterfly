@@ -61,6 +61,7 @@ public final class ButterflyActorSystem: DistributedActorSystem, Sendable {
     {
 
         #if SSL
+        // TODO: load this from config file paths
         let certPath = "cert.pem"
         let keyPath = "key.pem"
 
