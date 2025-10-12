@@ -1,5 +1,5 @@
 import Distributed
-import FoundationEssentials
+import Foundation
 import Logging
 import NIOCore
 import NIOPosix

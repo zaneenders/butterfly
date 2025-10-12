@@ -4,6 +4,9 @@ import PackageDescription
 
 let package = Package(
     name: "butterfly",
+    platforms: [
+        .macOS(.v26)
+    ],
     products: [
         .library(
             name: "Butterfly",
