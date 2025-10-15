@@ -6,12 +6,24 @@ import Testing
 
 @Suite
 struct WebSocketTests {
-    @Test func setup() throws {
-        let clientSystem = WebSocketSystem(.client)
+    @Test func setup() async throws {
+        let serverSystem = try await WebSocketSystem(
+            .server(host: "localhost", port: 7000, uri: "/"))
+        let clientSystem = try await WebSocketSystem(
+            .client(host: "localhost", port: 7000, uri: "/"))
+        let server = Backend(actorSystem: serverSystem)
         let client = Client(actorSystem: clientSystem)
-        let serverSystem = WebSocketSystem(.server)
+        try await Task.sleep(for: .milliseconds(100))
+        let serverConnection = try Backend.resolve(id: server.id, using: clientSystem)
         let remoteClient = try Client.resolve(id: client.id, using: serverSystem)
         Issue.record("Hello")
+    }
+}
+
+distributed actor Backend {
+    typealias ActorSystem = WebSocketSystem
+    init(actorSystem: WebSocketSystem) {
+        self.actorSystem = actorSystem
     }
 }
 
