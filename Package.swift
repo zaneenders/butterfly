@@ -32,9 +32,26 @@ let package = Package(
                 .plugin(name: "GitCommitHashPlugin", package: "git-commit-hash-plugin")
             ]
         ),
+        .target(
+            name: "WebSocketSystem",
+            dependencies: [
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOWebSocket", package: "swift-nio"),
+            ], swiftSettings: swiftSettings,
+            plugins: [
+                .plugin(name: "GitCommitHashPlugin", package: "git-commit-hash-plugin")
+            ]
+        ),
         .testTarget(
             name: "ButterflyTests",
             dependencies: ["Butterfly"]
+        ),
+        .testTarget(
+            name: "WebSocketSystemTests",
+            dependencies: ["WebSocketSystem"]
         ),
     ]
 )

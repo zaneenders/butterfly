@@ -3,6 +3,7 @@ import Foundation
 import Logging
 import NIOCore
 import NIOWebSocket
+import Synchronization
 
 struct WebSocketActorId: Sendable, Codable, Hashable {
     let host: String
@@ -16,12 +17,32 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
     typealias ResultHandler = Handler
     typealias SerializationRequirement = Codable & Sendable
     let logger: Logger
+    let encoder: JSONEncoder
+    let decoder: JSONDecoder
+
+    let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
 
     enum Mode {
         case server
         case client
     }
     let mode: Mode
+    var host: String {
+        switch mode {
+        case .server:
+            return server!.channel.localAddress!.ipAddress!
+        case .client:
+            return client!.channel.localAddress!.ipAddress!
+        }
+    }
+    var port: Int {
+        switch mode {
+        case .server:
+            return server!.channel.localAddress!.port!
+        case .client:
+            return client!.channel.localAddress!.port!
+        }
+    }
     let server: NIOAsyncChannel<EventLoopFuture<ServerUpgradeResult>, Never>?
     let client: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>?
 
@@ -47,6 +68,10 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
             }
             self.mode = .client
         }
+        self.encoder = JSONEncoder()
+        self.decoder = JSONDecoder()
+        self.decoder.userInfo[.actorSystemKey] = self
+        self.encoder.userInfo[.actorSystemKey] = self
         switch self.mode {
         case .server:
             Task {
@@ -64,12 +89,52 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                         print("no remote address?")
                                         return
                                     }
-                                    print(address)
+                                    let id = WebSocketActorId(
+                                        host: address.ipAddress!, port: address.port!)
+                                    print(id)
+                                    // NOTE: At this point we know the ID of which actor is connecting with us.
                                     try await wsChannel.executeThenClose { inbound, outbound in
-                                        try await withThrowingTaskGroup(of: Void.self) { group in
+                                        try await withThrowingTaskGroup { group in
                                             group.addTask {
-                                                for try await frame in inbound {
+                                                connection: for try await frame in inbound {
                                                     switch frame.opcode {
+                                                    case .text:
+                                                        let json = String(buffer: frame.data)
+                                                        print("Received: \(json.count)")
+                                                        let data = json.data(using: .utf8)!
+                                                        let networkMessage = try self.decoder
+                                                            .decode(
+                                                                WebSocketMessage.self, from: data)
+                                                        self.logger.trace("\(networkMessage)")
+                                                        let actor = self.lockedActors.withLock {
+                                                            actors in
+                                                            return actors[networkMessage.actorID]
+                                                        }
+                                                        self.logger.trace(
+                                                            "\(String(describing: actor))")
+                                                        guard let actor else {
+                                                            self.logger.error(
+                                                                "Missing \(type(of: actor))")
+                                                            self.lockedActors.withLock { actors in
+                                                                self.logger.trace(
+                                                                    "actors: \(actors)")
+                                                            }
+                                                            break connection  // TODO: send close connection signal
+                                                        }
+                                                        var decoder = CallDecoder(
+                                                            message: networkMessage,
+                                                            decoder: self.decoder,
+                                                            logLevel: self.logger.logLevel)
+                                                        let handler = Handler(
+                                                            outbound: outbound,
+                                                            encoder: self.encoder,
+                                                            logLevel: self.logger.logLevel)
+                                                        try await self.executeDistributedTarget(
+                                                            on: actor,
+                                                            target: RemoteCallTarget(
+                                                                networkMessage.target),
+                                                            invocationDecoder: &decoder,
+                                                            handler: handler)
                                                     case .ping:
                                                         print("Received ping")
                                                         var frameData = frame.data
@@ -135,12 +200,40 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                     fin: true, opcode: .ping, data: ByteBuffer(string: "Hello!"))
                 try await client!.executeThenClose { inbound, outbound in
                     try await outbound.write(pingFrame)
-                    for try await frame in inbound {
+                    connection: for try await frame in inbound {
                         switch frame.opcode {
                         case .pong:
                             print("Received pong: \(String(buffer: frame.data))")
                         case .text:
-                            print("Received: \(String(buffer: frame.data))")
+                            let json = String(buffer: frame.data)
+                            print("Received: \(json.count)")
+                            let data = json.data(using: .utf8)!
+                            let networkMessage = try self.decoder.decode(
+                                WebSocketMessage.self, from: data)
+                            self.logger.trace("\(networkMessage)")
+                            let actor = self.lockedActors.withLock { actors in
+                                return actors[networkMessage.actorID]
+                            }
+                            self.logger.trace("\(String(describing: actor))")
+                            guard let actor else {
+                                self.logger.error("Missing \(type(of: actor))")
+                                self.lockedActors.withLock { actors in
+                                    self.logger.trace("actors: \(actors)")
+                                }
+                                break connection  // TODO: send close connection signal
+                            }
+                            var decoder = CallDecoder(
+                                message: networkMessage, decoder: self.decoder,
+                                logLevel: self.logger.logLevel)
+                            let handler = Handler(
+                                outbound: outbound,
+                                encoder: self.encoder,
+                                logLevel: self.logger.logLevel)
+                            try await self.executeDistributedTarget(
+                                on: actor,
+                                target: RemoteCallTarget(networkMessage.target),
+                                invocationDecoder: &decoder,
+                                handler: handler)
                         case .connectionClose:
                             // Handle a received close frame. We're just going to close by returning from this method.
                             print("Received Close instruction from server")
@@ -158,24 +251,40 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
         }
     }
 
-    func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
-    where Act: DistributedActor, ActorID == Act.ID {
-        logger.trace(#function)
-        throw WebSocketSystemError.message(#function)
-    }
-
     func assignID<Act>(_ actorType: Act.Type) -> ActorID
     where Act: DistributedActor, ActorID == Act.ID {
-        logger.trace(#function)
-        return WebSocketActorId(host: "localhost", port: 42069)
+        logger.trace("\(#function) \(host) \(port)")
+        return WebSocketActorId(host: host, port: port)  // TODO: UUID or something for the actor?
     }
 
     func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
+        lockedActors.withLock { actors in
+            // TODO: upgrade to weak reference
+            actors[actor.id] = actor
+        }
         logger.trace(#function)
     }
 
     func resignID(_ id: ActorID) {
+        let deadActor = lockedActors.withLock { actors in
+            actors.removeValue(forKey: id)
+        }
+        guard deadActor != nil else {
+            fatalError("Went to remove id: \(id), but no actor found by that id.")
+            // NOTE: This is a programming error
+        }
         logger.trace(#function)
+    }
+
+    func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
+    where Act: DistributedActor, ActorID == Act.ID {
+        let actor = lockedActors.withLock { actors in
+            actors[id]
+        }
+        let r = actor as? Act
+        // TODO: delete these last two lines of code.
+        logger.trace("\(#function): \(String(describing: r))")
+        return r
     }
 
     func makeInvocationEncoder() -> InvocationEncoder {
@@ -189,7 +298,40 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
         invocation: inout InvocationEncoder,
         throwing: Err.Type
     ) async throws where Act: DistributedActor, Err: Error, WebSocketActorId == Act.ID {
-        logger.trace(#function)
+        logger.trace("\(#function): on \(actor.id) , from: \(mode)")
+        guard let errorName = _mangledTypeName(Err.self) else {
+            throw WebSocketSystemError.message("returnNameManglingError")
+        }
+        let msg = WebSocketMessage(
+            actorID: actor.id,
+            target: target.identifier,
+            genericSubstitutions: invocation.genericSubs,
+            arguments: invocation.argumentData,
+            returnTypeName: nil,
+            throwingTypeName: errorName)
+
+        let payload = try encoder.encode(msg)
+
+        guard let json = String(data: payload, encoding: .utf8) else {
+            throw WebSocketSystemError.message("Could not find json")
+        }
+        let frame = WebSocketFrame(
+            fin: true, opcode: .text, data: ByteBuffer(string: json))
+        // TODO: Get the connection associated with actor.id
+        // TODO: send json with client
+        // TODO: decode response
+        let data = json.data(using: .utf8)!
+        do {
+            let rsp: RemoteWSErrorMessage = try self.decoder.decode(
+                RemoteWSErrorMessage.self, from: data)
+            logger.trace("throwing error: \(type(of: rsp)) \(rsp)")
+            // TODO: throw the actual error
+            throw WebSocketSystemError.message(rsp.message)
+        } catch let expected as WebSocketSystemError {
+            throw expected
+        } catch {
+            return
+        }
     }
 
     public func remoteCall<Act, Err, Res>(
@@ -202,8 +344,50 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
     where
         Act: DistributedActor, Act.ID == WebSocketActorId, Err: Error, Res: SerializationRequirement
     {
-        logger.trace(#function)
-        throw WebSocketSystemError.message(#function)
+        logger.trace("\(#function): on \(actor.id) , from: \(mode)")
+        guard let respName = _mangledTypeName(Res.self) else {
+            throw WebSocketSystemError.message("returnNameManglingError")
+        }
+        guard let errorName = _mangledTypeName(Err.self) else {
+            throw WebSocketSystemError.message("returnNameManglingError")
+        }
+
+        let msg = WebSocketMessage(
+            actorID: actor.id,
+            target: target.identifier,
+            genericSubstitutions: invocation.genericSubs,
+            arguments: invocation.argumentData,
+            returnTypeName: respName,
+            throwingTypeName: errorName)
+
+        let payload = try self.encoder.encode(msg)
+
+        guard let json = String(data: payload, encoding: .utf8) else {
+            throw WebSocketSystemError.message("Cloud not decdoe json")
+        }
+        let frame = WebSocketFrame(
+            fin: true, opcode: .text, data: ByteBuffer(string: json))
+        // TODO: Get the connection associated with actor.id
+        // TODO: send json with client
+        // TODO: decode response
+        let data = json.data(using: .utf8)!
+        do {
+            let rsp: Res = try self.decoder.decode(Res.self, from: data)
+            logger.trace("returning: \(type(of: rsp)) \(rsp)")
+            return rsp
+        } catch {
+            do {
+                let rsp: RemoteWSErrorMessage = try self.decoder.decode(
+                    RemoteWSErrorMessage.self, from: data)
+                logger.trace("throwing error: \(type(of: rsp)) \(rsp)")
+                // TODO: throw the actual error
+                throw WebSocketSystemError.message(rsp.message)
+            } catch let expected as WebSocketSystemError {
+                throw expected
+            } catch {
+                throw WebSocketSystemError.message("Invalid reponse")
+            }
+        }
     }
 }
 
@@ -230,7 +414,8 @@ extension WebSocketSystem {
         )
             throws
         {
-            logger.trace(#function)
+            let data = try actorSystem.encoder.encode(argument.value)
+            self.argumentData.append(data)
         }
 
         public mutating func recordGenericSubstitution<T>(_ type: T.Type) throws {
@@ -272,11 +457,11 @@ extension WebSocketSystem {
         public typealias SerializationRequirement = Sendable & Codable
 
         let logger: Logger
-        let message: NetworkMessage
+        let message: WebSocketMessage
         let decoder: JSONDecoder
         var argumentsIterator: Array<Data>.Iterator
 
-        init(message: NetworkMessage, decoder: JSONDecoder, logLevel: Logger.Level) {
+        init(message: WebSocketMessage, decoder: JSONDecoder, logLevel: Logger.Level) {
             self.logger = Logger.create(label: "CallDecoder", logLevel: logLevel)
             self.message = message
             self.decoder = decoder
@@ -332,24 +517,45 @@ extension WebSocketSystem {
         public typealias SerializationRequirement = Sendable & Codable
 
         let logger: Logger
+        let encoder: JSONEncoder
+        let outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
 
         init(
+            outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>,
+            encoder: JSONEncoder,
             logLevel: Logger.Level
         ) {
             self.logger = Logger.create(label: "Handler", logLevel: logLevel)
+            self.encoder = encoder
+            self.outbound = outbound
         }
 
         public func onReturn<Success: SerializationRequirement>(value: Success) async throws {
             logger.trace("\(#function)")
+            let data = try encoder.encode(value)
+            let json = String(data: data, encoding: .utf8)!
+            let frame = WebSocketFrame(
+                fin: true, opcode: .text, data: ByteBuffer(string: json))
+            try await outbound.write(frame)
         }
 
         public func onReturnVoid() async throws {
             logger.trace("\(#function)")
+            let frame = WebSocketFrame(
+                fin: true, opcode: .text, data: ByteBuffer(string: "VOID"))
+            try await outbound.write(frame)
             return
         }
 
         public func onThrow<Err>(error: Err) async throws where Err: Error {
             logger.trace("\(#function)")
+            // TODO: Return the actual arror
+            let re = RemoteWSErrorMessage(message: "\(error)")
+            let data = try encoder.encode(re)
+            let json = String(data: data, encoding: .utf8)!
+            let frame = WebSocketFrame(
+                fin: true, opcode: .text, data: ByteBuffer(string: json))
+            try await outbound.write(frame)
         }
     }
 }
@@ -365,4 +571,8 @@ struct WebSocketMessage: Codable, Sendable {
     let arguments: [Data]
     let returnTypeName: String?
     let throwingTypeName: String?
+}
+
+struct RemoteWSErrorMessage: Error, Equatable, Sendable, Codable {
+    let message: String
 }
