@@ -27,83 +27,90 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
     typealias InvocationDecoder = CallDecoder
     typealias ResultHandler = Handler
     typealias SerializationRequirement = Codable & Sendable
-    let logger: Logger
-    let encoder: JSONEncoder
-    let decoder: JSONDecoder
+    private let logger: Logger
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
 
-    let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
+    private let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
 
     enum Mode {
         case server
         case client
     }
     let mode: Mode
+
     var host: String {
         switch mode {
         case .server:
-            return server!.channel.localAddress!.ipAddress!
+            return serverChannel!.channel.localAddress!.ipAddress!
         case .client:
-            return client!.channel.localAddress!.ipAddress!
+            return clientChannel!.channel.localAddress!.ipAddress!
         }
     }
     var port: Int {
         switch mode {
         case .server:
-            return server!.channel.localAddress!.port!
+            return serverChannel!.channel.localAddress!.port!
         case .client:
-            return client!.channel.localAddress!.port!
+            return clientChannel!.channel.localAddress!.port!
         }
     }
-    let server: NIOAsyncChannel<EventLoopFuture<ServerUpgradeResult>, Never>?
-    let client: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>?
+
+    private let serverChannel: NIOAsyncChannel<EventLoopFuture<ServerUpgradeResult>, Never>?
+    private let clientChannel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>?
 
     enum Config {
         case client(host: String, port: Int, uri: String)
         case server(host: String, port: Int, uri: String)
     }
-    init(_ mode: Config) async throws {  // TODO: sync start up?
+
+    init(_ mode: Config) async throws {
         let id: WebSocketActorId
         switch mode {
         case .server(let host, let port, _):
             id = WebSocketActorId(host: host, port: port)
-            self.server = try await boot(host: host, port: port)
-            self.client = nil
+            self.serverChannel = try await boot(host: host, port: port)
+            self.clientChannel = nil
             self.mode = .server
         case .client(let host, let port, let uri):
             id = WebSocketActorId(host: host, port: port)
-            self.server = nil
+            self.serverChannel = nil
             let r = try await connect(host: host, port: port, uri: uri)
             switch r {
             case .notUpgraded:
                 throw WSClientError.notUpgraded
             case .websocket(let channel):
-                self.client = channel
+                self.clientChannel = channel
             }
             self.mode = .client
         }
-        self.logger = .create(label: "WebSocketSystem[\(self.mode):\(id)]", logLevel: .trace)
+        self.logger = .create(label: "WebSocketSystem[\(self.mode):\(id)]", logLevel: .error)
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
         self.decoder.userInfo[.actorSystemKey] = self
         self.encoder.userInfo[.actorSystemKey] = self
+        run()
+    }
+
+    private func run() {
         switch self.mode {
         case .server:
             Task {
                 try await withThrowingDiscardingTaskGroup { group in
-                    try await server!.executeThenClose { inbound in
+                    try await serverChannel!.executeThenClose { inbound in
                         for try await upgradeResult in inbound {
                             group.addTask {
                                 let connection = try await upgradeResult.get()
                                 switch connection {
                                 case .notUpgraded:
-                                    print("not upgraded")
+                                    self.logger.error("not upgraded")
                                     return
                                 case .websocket(let wsChannel):
                                     guard let address = wsChannel.channel.remoteAddress else {
-                                        print("no remote address?")
+                                        self.logger.error("no remote address?")
                                         return
                                     }
-                                    let remoteId = WebSocketActorId(
+                                    let remoteID = WebSocketActorId(
                                         host: address.ipAddress!, port: address.port!)
                                     try await wsChannel.executeThenClose { inbound, outbound in
                                         try await withThrowingTaskGroup { group in
@@ -112,8 +119,26 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                     switch frame.opcode {
                                                     case .text:
                                                         let json = String(buffer: frame.data)
-                                                        print("Received: \(json.count)")
+                                                        self.logger.trace("Received: \(json.count)")
                                                         let data = json.data(using: .utf8)!
+                                                        if let callBack = try? self.decoder.decode(
+                                                            ResponseJSONMessage.self, from: data)
+                                                        {
+                                                            let continuation = self
+                                                                .lockedAwaitingInbound.withLock {
+                                                                    mailBox in
+                                                                    self.logger.warning(
+                                                                        "mailBox: \(mailBox)")
+                                                                    return mailBox[
+                                                                        callBack.id]
+                                                                }
+                                                            self.logger.trace(
+                                                                "\(callBack.id) sent: \(callBack.json) \(String(describing: continuation))"
+                                                            )
+                                                            continuation?.resume(
+                                                                returning: callBack.json)
+                                                            continue connection
+                                                        }
                                                         guard
                                                             let networkMessage = try? self.decoder
                                                                 .decode(
@@ -126,16 +151,6 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                         }
                                                         self.logger.trace("\(networkMessage)")
 
-                                                        let continuation = self
-                                                            .lockedAwaitingInbound.withLock {
-                                                                mailBox in
-                                                                self.logger.warning(
-                                                                    "mailBox: \(mailBox)")
-                                                                return mailBox[
-                                                                    networkMessage.messageID]
-                                                            }
-                                                        print(
-                                                            "IDK DO SOMETHING HERE \(continuation)")
                                                         let actor = self.lockedActors.withLock {
                                                             actors in
                                                             return actors[networkMessage.actorID]
@@ -166,10 +181,10 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                                 networkMessage.target),
                                                             invocationDecoder: &decoder,
                                                             handler: handler)
-                                                        self.logger.warning(
+                                                        self.logger.trace(
                                                             "Message handled: \(networkMessage)")
                                                     case .ping:
-                                                        print("Received ping")
+                                                        self.logger.trace("Received ping")
                                                         var frameData = frame.data
                                                         let maskingKey = frame.maskKey
 
@@ -182,7 +197,7 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                             data: frameData)
                                                         try await outbound.write(responseFrame)
                                                     case .connectionClose:
-                                                        print("Received close")
+                                                        self.logger.trace("Received close")
                                                         var data = frame.unmaskedData
                                                         let closeDataCode =
                                                             data.readSlice(length: 2)
@@ -193,72 +208,45 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                         try await outbound.write(closeFrame)
                                                         return
                                                     case .binary, .continuation, .pong:
+                                                        self.logger.trace("opcode: \(frame.opcode)")
                                                         break
                                                     default:
+                                                        self.logger.critical(
+                                                            "opcode: \(frame.opcode)")
                                                         return
                                                     }
                                                 }
                                             }
 
                                             group.addTask {
-                                                while true {
-                                                    let hasMessages = self.outgoingMailbox
-                                                        .withLock {
-                                                            mailBox in
-                                                            return mailBox[remoteId] != nil
-                                                        }
-                                                    if hasMessages {
-                                                        self.logger.notice("SERVER Has messages!!!")
-                                                        let (frames, awaiting) =
-                                                            self.outgoingMailbox
-                                                            .withLock {
-                                                                mailBox in
-                                                                let outgoing = mailBox[remoteId]!
-                                                                mailBox.removeValue(
-                                                                    forKey: remoteId)
-                                                                var awaiting: [AwaitingInbound] = []
-                                                                var frames: [WebSocketFrame] = []
-                                                                for out in outgoing {
-                                                                    frames.append(out.frame)
-                                                                    awaiting.append(
-                                                                        AwaitingInbound(
-                                                                            id: out.id,
-                                                                            continuation: out
-                                                                                .continuation))
+                                                for await _ in self.messageQueue.stream {
+                                                    if let outgoing = await self.messageQueue
+                                                        .dequeueAll(for: remoteID)
+                                                    {
+                                                        for out in outgoing {
+                                                            do {
+                                                                try await outbound.write(out.frame)
+                                                                self.logger.trace(
+                                                                    "\(out.id) sent to \(remoteID)")
+                                                                self.lockedAwaitingInbound.withLock
+                                                                { mailBox in
+                                                                    mailBox[out.id] =
+                                                                        out.continuation
                                                                 }
-                                                                return (frames, awaiting)
-                                                            }
-                                                        for (frame, info) in zip(
-                                                            frames, awaiting)
-                                                        {
-                                                            Task {
-                                                                do {
-                                                                    self.logger.trace(
-                                                                        "sending message: \(remoteId) \(info.id)"
-                                                                    )
-                                                                    try await outbound.write(
-                                                                        frame)
-                                                                } catch {
-                                                                    self.logger.critical(
-                                                                        "Failed to send message: \(info.id) \(error)"
-                                                                    )
-                                                                    info.continuation.resume(
-                                                                        throwing:
-                                                                            WebSocketSystemError
-                                                                            .message(
-                                                                                "Failed to send message: \(frame) \(error)"
-                                                                            ))
-                                                                }
-                                                            }
-                                                        }
-                                                        self.lockedAwaitingInbound.withLock {
-                                                            mailBox in
-                                                            for m in awaiting {
-                                                                mailBox[m.id] =
-                                                                    m.continuation
+                                                            } catch {
+                                                                out.continuation.resume(
+                                                                    throwing:
+                                                                        WebSocketSystemError.message(
+                                                                            "Send failed: \(error)")
+                                                                )
                                                             }
                                                         }
                                                     }
+                                                }
+                                            }
+
+                                            group.addTask {
+                                                while true {
                                                     let theTime = ContinuousClock().now
                                                     var buffer = wsChannel.channel.allocator.buffer(
                                                         capacity: 12)
@@ -267,7 +255,7 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                     let frame = WebSocketFrame(
                                                         fin: true, opcode: .ping, data: buffer)
 
-                                                    print("Sending time")
+                                                    self.logger.trace("Sending time: \(theTime)")
                                                     try await outbound.write(frame)
                                                     try await Task.sleep(for: .seconds(1))
                                                 }
@@ -280,30 +268,32 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                 }
                             }
                         }
-                        print("Server shutting down")
+                        self.logger.warning("Server shutting down")
                     }
                 }
             }
         case .client:
             Task {
                 let pingFrame = WebSocketFrame(
-                    fin: true, opcode: .ping, data: ByteBuffer(string: "Hello!"))
-                try await client!.executeThenClose { inbound, outbound in
-                    let retmoteId = WebSocketActorId(
-                        host: client!.channel.remoteAddress!.ipAddress!,
-                        port: client!.channel.remoteAddress!.port!)
+                    fin: true, opcode: .ping, data: ByteBuffer(string: ""))
+                try await clientChannel!.executeThenClose { inbound, outbound in
+                    let remoteID = WebSocketActorId(
+                        host: clientChannel!.channel.remoteAddress!.ipAddress!,
+                        port: clientChannel!.channel.remoteAddress!.port!)
                     try await withThrowingTaskGroup { group in
                         group.addTask {
                             try await outbound.write(pingFrame)
                             connection: for try await frame in inbound {
                                 switch frame.opcode {
                                 case .pong:
-                                    print("Received pong: \(String(buffer: frame.data))")
+                                    self.logger.trace(
+                                        "Received pong: \(String(buffer: frame.data))")
                                 case .ping:
-                                    print("Received ping: \(String(buffer: frame.data))")
+                                    self.logger.trace(
+                                        "Received ping: \(String(buffer: frame.data))")
                                 case .text:
                                     let json = String(buffer: frame.data)
-                                    print("Received: \(json.count)")
+                                    self.logger.trace("Received count: \(json.count)")
                                     let data = json.data(using: .utf8)!
                                     if let callBack = try? self.decoder.decode(
                                         ResponseJSONMessage.self, from: data)
@@ -315,8 +305,11 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                 return mailBox[
                                                     callBack.id]
                                             }
-                                        self.logger.trace("\(callBack.id) sent: \(callBack.json)")
+                                        self.logger.trace(
+                                            "\(callBack.id) sent: \(callBack.json) \(String(describing: continuation))"
+                                        )
                                         continuation?.resume(returning: callBack.json)
+                                        continue connection
                                     }
                                     guard
                                         let networkMessage = try? self.decoder.decode(
@@ -351,71 +344,33 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
                                         invocationDecoder: &decoder,
                                         handler: handler)
                                 case .connectionClose:
-                                    // Handle a received close frame. We're just going to close by returning from this method.
-                                    print("Received Close instruction from server")
+                                    self.logger.warning("Received Close instruction from server")
                                     return
                                 case .binary, .continuation:
-                                    // We ignore these frames.
+                                    self.logger.trace("opcode: \(frame.opcode)")
                                     break
                                 default:
-                                    // Unknown frames are errors.
+                                    self.logger.critical("opcode: \(frame.opcode)")
                                     return
                                 }
                             }
                         }
 
                         group.addTask {
-                            while true {
-                                try? await Task.sleep(for: .seconds(1))
-                                let hasMessages = self.outgoingMailbox
-                                    .withLock {
-                                        mailBox in
-                                        return mailBox[retmoteId] != nil
-                                    }
-                                if hasMessages {
-                                    self.logger.notice("CLIENT Has messages!!!")
-                                    let (frames, awaiting) =
-                                        self.outgoingMailbox
-                                        .withLock {
-                                            mailBox in
-                                            let outgoing = mailBox[id]!
-                                            mailBox.removeValue(forKey: id)
-                                            var awaiting: [AwaitingInbound] = []
-                                            var frames: [WebSocketFrame] = []
-                                            for out in outgoing {
-                                                frames.append(out.frame)
-                                                awaiting.append(
-                                                    AwaitingInbound(
-                                                        id: out.id,
-                                                        continuation: out
-                                                            .continuation))
+                            for await _ in self.messageQueue.stream {
+                                if let outgoing = await self.messageQueue.dequeueAll(for: remoteID)
+                                {
+                                    for out in outgoing {
+                                        do {
+                                            try await outbound.write(out.frame)
+                                            self.logger.trace("\(out.id) sent to \(remoteID)")
+                                            self.lockedAwaitingInbound.withLock { mailBox in
+                                                mailBox[out.id] = out.continuation
                                             }
-                                            return (frames, awaiting)
-                                        }
-                                    for (frame, info) in zip(
-                                        frames, awaiting)
-                                    {
-                                        Task {
-                                            do {
-                                                self.logger.trace("\(info.id) to \(retmoteId)")
-                                                try await outbound.write(frame)
-                                            } catch {
-                                                self.logger.critical(
-                                                    "Failed to send message: \(info.id) \(error)"
-                                                )
-                                                info.continuation.resume(
-                                                    throwing:
-                                                        WebSocketSystemError
-                                                        .message(
-                                                            "Failed to send message: \(frame) \(error)"
-                                                        ))
-                                            }
-                                        }
-                                    }
-                                    self.lockedAwaitingInbound.withLock {
-                                        mailBox in
-                                        for m in awaiting {
-                                            mailBox[m.id] = m.continuation
+                                        } catch {
+                                            out.continuation.resume(
+                                                throwing: WebSocketSystemError.message(
+                                                    "Send failed: \(error)"))
                                         }
                                     }
                                 }
@@ -476,7 +431,6 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
 
     let lockedAwaitingInbound: Mutex<[UUID: MailboxMessage]> = Mutex([:])
-    let outgoingMailbox: Mutex<[ActorID: [OutGoingMessage]]> = Mutex([:])
 
     struct OutGoingMessage {
         let id: UUID
@@ -512,23 +466,18 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
         let frame = WebSocketFrame(
             fin: true, opcode: .text, data: ByteBuffer(string: json))
 
-        // TODO: get a continuation to await with.
         let value = try await withCheckedThrowingContinuation {
             (continuation: CheckedContinuation<any SerializationRequirement, any Error>) in
-            // TODO: Add message to Q to be sent
-            outgoingMailbox.withLock { mailBox in
-                let m = OutGoingMessage(id: msg.messageID, frame: frame, continuation: continuation)
-                if mailBox[actor.id] == nil {
-                    self.logger.notice("[\(actor.id)]Creating [message]: \(msg.messageID)")
-                    mailBox[actor.id] = [m]
-                } else {
-                    self.logger.notice("[\(actor.id)]Creating message: \(msg.messageID)")
-                    mailBox[actor.id]!.append(m)
-                }
+            let m = OutGoingMessage(id: msg.messageID, frame: frame, continuation: continuation)
+            Task.immediate {
+                await messageQueue.enqueue(m, for: actor.id)
             }
         }
         guard let jsonRsp = value as? String else {
             throw WebSocketSystemError.message("Failed to view json string \(type(of: value))")
+        }
+        if jsonRsp == voidReturnMarker {
+            return
         }
         let data = jsonRsp.data(using: .utf8)!
         do {
@@ -579,19 +528,11 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
         let frame = WebSocketFrame(
             fin: true, opcode: .text, data: ByteBuffer(string: json))
 
-        // TODO: get a continuation to await with.
         let value = try await withCheckedThrowingContinuation {
             (continuation: CheckedContinuation<any SerializationRequirement, any Error>) in
-            // TODO: Add message to Q to be sent
-            outgoingMailbox.withLock { mailBox in
-                let m = OutGoingMessage(id: msg.messageID, frame: frame, continuation: continuation)
-                if mailBox[actor.id] == nil {
-                    self.logger.notice("[\(actor.id)]Creating [message]: \(msg.messageID)")
-                    mailBox[actor.id] = [m]
-                } else {
-                    self.logger.notice("[\(actor.id)]Creating message: \(msg.messageID)")
-                    mailBox[actor.id]!.append(m)
-                }
+            let m = OutGoingMessage(id: msg.messageID, frame: frame, continuation: continuation)
+            Task.immediate {
+                await messageQueue.enqueue(m, for: actor.id)
             }
         }
 
@@ -615,6 +556,29 @@ final class WebSocketSystem: DistributedActorSystem, Sendable {
             } catch {
                 throw WebSocketSystemError.message("Invalid reponse")
             }
+        }
+    }
+
+    let messageQueue = OutgoingMessageQueue()
+
+    actor OutgoingMessageQueue {
+        private var continuation: AsyncStream<Void>.Continuation
+        private var mailbox: [ActorID: [OutGoingMessage]] = [:]
+
+        let stream: AsyncStream<Void>
+
+        init() {
+            (stream, continuation) = AsyncStream.makeStream()
+        }
+
+        func enqueue(_ message: OutGoingMessage, for actor: ActorID) {
+            mailbox[actor, default: []].append(message)
+            continuation.yield()
+        }
+
+        func dequeueAll(for actor: ActorID) -> [OutGoingMessage]? {
+            defer { continuation.yield() }
+            return mailbox.removeValue(forKey: actor)
         }
     }
 }
@@ -781,8 +745,13 @@ extension WebSocketSystem {
 
         public func onReturnVoid() async throws {
             logger.trace("\(#function)")
+            let vdata = try encoder.encode(voidReturnMarker)
+            let vjson = String(data: vdata, encoding: .utf8)!
+            let rsp = ResponseJSONMessage(id: id, json: vjson)
+            let data = try encoder.encode(rsp)
+            let json = String(data: data, encoding: .utf8)!
             let frame = WebSocketFrame(
-                fin: true, opcode: .text, data: ByteBuffer(string: "VOID"))
+                fin: true, opcode: .text, data: ByteBuffer(string: json))
             do {
                 try await outbound.write(frame)
                 return
@@ -810,6 +779,8 @@ extension WebSocketSystem {
         }
     }
 }
+
+let voidReturnMarker = "VOID"
 
 struct ResponseJSONMessage: Codable, Sendable {
     let id: UUID

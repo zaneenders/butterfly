@@ -18,9 +18,30 @@ struct WebSocketTests {
         let remoteClient = try Client.resolve(id: client.id, using: serverSystem)
         let id = try await serverConnection.doWork()
         #expect(id == 69)
-        // try await remoteClient.sendResult("\(id)")
-        // let result = try await serverConnection.getResult(id)
-        // #expect("\(id)" == result)
+        try await remoteClient.sendResult("\(id)")
+        let result = try await serverConnection.getResult(id)
+        #expect("\(id)" == result)
+
+        let messagesToSend = 10_000
+        let count = await withTaskGroup(of: Int.self) { group in
+            for _ in 0..<messagesToSend {
+                group.addTask {
+                    let id = try? await serverConnection.doWork()
+                    if let id {
+                        print(id)
+                        return 1
+                    } else {
+                        return 0
+                    }
+                }
+            }
+            var total = 0
+            for await result in group {
+                total += result
+            }
+            return total
+        }
+        #expect(count == messagesToSend)
     }
 }
 
