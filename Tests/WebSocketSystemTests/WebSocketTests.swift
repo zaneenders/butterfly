@@ -1,17 +1,22 @@
 import Distributed
 import Logging
 import Testing
-
-@testable import WebSocketSystem
+import WebSocketSystem
 
 @Suite
 struct WebSocketTests {
     @Test func setup() async throws {
         // Setup networking
         let serverSystem = try await WebSocketSystem(
-            .server(host: "localhost", port: 7000, uri: "/"))
+            .server(host: "::1", port: 7000, uri: "/")
+        )
+        try await serverSystem.start(background: true)
+
         let clientSystem = try await WebSocketSystem(
-            .client(host: "localhost", port: 7000, uri: "/"))
+            .client(host: "::1", port: 7000, uri: "/")
+        )
+        try await clientSystem.start(background: true)
+
         // Create actor instances and assign them to an actorsystem.
         let server = Backend(actorSystem: serverSystem)
         let client = Client(actorSystem: clientSystem)
@@ -48,6 +53,8 @@ struct WebSocketTests {
             return total
         }
         #expect(count == messagesToSend)
+        try await clientSystem.shutdown()
+        try await serverSystem.shutdown()
     }
 }
 
