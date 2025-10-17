@@ -7,21 +7,27 @@ import Testing
 @Suite
 struct WebSocketTests {
     @Test func setup() async throws {
+        // Setup networking
         let serverSystem = try await WebSocketSystem(
             .server(host: "localhost", port: 7000, uri: "/"))
         let clientSystem = try await WebSocketSystem(
             .client(host: "localhost", port: 7000, uri: "/"))
+        // Create actor instances and assign them to an actorsystem.
         let server = Backend(actorSystem: serverSystem)
         let client = Client(actorSystem: clientSystem)
-        try await Task.sleep(for: .milliseconds(100))
+
+        // Get remote references. Simulating a another computer being able to perform remote calls on another node.
+        // For now the id is just the host and port of the node.
         let serverConnection = try Backend.resolve(id: server.id, using: clientSystem)
         let remoteClient = try Client.resolve(id: client.id, using: serverSystem)
+        // Various remote calls that are server through the WebSocket connection.
         let id = try await serverConnection.doWork()
         #expect(id == 69)
         try await remoteClient.sendResult("\(id)")
         let result = try await serverConnection.getResult(id)
         #expect("\(id)" == result)
 
+        // Takes about 1.7 seconds right now. Not great but the code is pretty crap.
         let messagesToSend = 10_000
         let count = await withTaskGroup(of: Int.self) { group in
             for _ in 0..<messagesToSend {
