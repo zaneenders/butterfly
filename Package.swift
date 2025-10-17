@@ -10,7 +10,7 @@ let package = Package(
     products: [
         .library(
             name: "Butterfly",
-            targets: ["Butterfly"]
+            targets: ["Butterfly", "WebSocketSystem"]
         )
     ],
     dependencies: [
