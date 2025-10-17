@@ -32,6 +32,20 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     private let decoder: JSONDecoder
 
     private let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
+    private let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
+    private let lockedAwaitingInbound: Mutex<[UUID: MailboxMessage]> = Mutex([:])
+    private let backgroundTask: Mutex<Task<(), Error>?> = Mutex(nil)
+
+    struct OutGoingMessage {
+        let id: UUID
+        let frame: WebSocketFrame
+        let continuation: MailboxMessage
+    }
+
+    struct AwaitingInbound {
+        let id: UUID
+        let continuation: MailboxMessage
+    }
 
     public enum Mode: Sendable {
         case server
@@ -64,7 +78,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         case server(host: String, port: Int, uri: String)
     }
 
-    public init(_ mode: Config, logLevel: Logger.Level = .error) async throws {
+    public init(_ mode: Config, logLevel: Logger.Level) async throws {
         let id: WebSocketActorId
         switch mode {
         case .server(let host, let port, _):
@@ -103,34 +117,64 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         }
     }
 
-    public func start(background: Bool = false) async throws {
-        switch self.mode {
-        case .server:
-            try await run(service: _runAsServer, background: background)
-        case .client:
-            try await run(service: _runAsClient, background: background)
-        }
+    deinit {
+        shutdown()
     }
 
-    public func shutdown() async throws {
-        switch self.mode {
-        case .server:
-            try await serverChannel!.channel.close(mode: .all)
-        case .client:
-            try await clientChannel!.channel.close(mode: .all)
-        }
-    }
-
-    private func run(service: @escaping @Sendable () async throws -> Void, background: Bool)
-        async throws
-    {
-        if !background {
-            try await service()
-            try await Task.sleep(for: .milliseconds(150))  // NOTE: delay to let the server boot up.
-        } else {
-            Task {
-                try await service()
+    public func shutdown() {
+        lockedAwaitingInbound.withLock { messages in
+            for message in messages {
+                let value = messages.removeValue(forKey: message.key)
+                value?.resume(throwing: WebSocketSystemError.message("Shutting down"))
             }
+        }
+        let t = backgroundTask.withLock { task in
+            task?.cancel()
+            return task
+        }
+        self.logger.notice("\(String(describing: t))")
+        Task.immediate {
+            do {
+                try await t?.value
+            } catch is CancellationError {
+                // Expected
+            } catch {
+                self.logger.notice("task value error: \(error)")
+            }
+        }
+    }
+
+    public func start() async throws {
+        switch self.mode {
+        case .server:
+            try await _runAsServer()
+        case .client:
+            try await _runAsClient()
+        }
+    }
+
+    public func background() {
+        switch self.mode {
+        case .server:
+            _background(service: _runAsServer)
+        case .client:
+            _background(service: _runAsClient)
+        }
+    }
+
+    private func _background(service: @escaping @Sendable () async throws -> Void) {
+        let t = Task {
+            do {
+                try await service()
+            } catch is CancellationError {
+                // Expected
+            } catch {
+                self.logger.critical("BACKGROUND ERROR: \(error)")
+                throw error
+            }
+        }
+        backgroundTask.withLock { task in
+            task = t
         }
     }
 
@@ -168,9 +212,13 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                             mailBox in
                                                             self.logger.warning(
                                                                 "mailBox: \(mailBox)")
-                                                            return mailBox[
-                                                                callBack.id]
+                                                            return mailBox.removeValue(
+                                                                forKey: callBack.id)
                                                         }
+                                                    _ = self.lockedMessagesInflight.withLock {
+                                                        inFlight in
+                                                        inFlight[remoteID]?.remove(callBack.id)
+                                                    }
                                                     self.logger.trace(
                                                         "\(callBack.id) sent: \(callBack.json) \(String(describing: continuation))"
                                                     )
@@ -272,6 +320,10 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                                             mailBox[out.id] =
                                                                 out.continuation
                                                         }
+                                                        _ = self.lockedMessagesInflight.withLock {
+                                                            inFlight in
+                                                            inFlight[remoteID]?.insert(out.id)
+                                                        }
                                                     } catch {
                                                         out.continuation.resume(
                                                             throwing:
@@ -302,6 +354,21 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
                                     try await group.next()
                                     group.cancelAll()
+                                }
+                            }
+                            self.logger.notice("Connection to: \(remoteID) closed.")
+                            let dead = self.lockedMessagesInflight.withLock {
+                                inFlight in
+                                inFlight.removeValue(forKey: remoteID)
+                            }
+                            if let dead {
+                                self.lockedAwaitingInbound.withLock { messages in
+                                    for d in dead {
+                                        let m = messages.removeValue(forKey: d)
+                                        m?.resume(
+                                            throwing: WebSocketSystemError.message(
+                                                "Connection Closed"))
+                                    }
                                 }
                             }
                         }
@@ -341,9 +408,12 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                     .lockedAwaitingInbound.withLock {
                                         mailBox in
                                         self.logger.warning("mailBox: \(mailBox)")
-                                        return mailBox[
-                                            callBack.id]
+                                        return mailBox.removeValue(forKey: callBack.id)
                                     }
+                                _ = self.lockedMessagesInflight.withLock {
+                                    messages in
+                                    messages[remoteID]?.remove(callBack.id)
+                                }
                                 self.logger.trace(
                                     "\(callBack.id) sent: \(callBack.json) \(String(describing: continuation))"
                                 )
@@ -405,6 +475,9 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                     self.lockedAwaitingInbound.withLock { mailBox in
                                         mailBox[out.id] = out.continuation
                                     }
+                                    _ = self.lockedMessagesInflight.withLock { inFlight in
+                                        inFlight[remoteID]?.insert(out.id)
+                                    }
                                 } catch {
                                     out.continuation.resume(
                                         throwing: WebSocketSystemError.message(
@@ -417,12 +490,23 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                 try await group.next()
                 group.cancelAll()
             }
-        }
-    }
 
-    struct AwaitingInbound {
-        let id: UUID
-        let continuation: MailboxMessage
+            self.logger.notice("Connection to: \(remoteID) closed.")
+            let dead = self.lockedMessagesInflight.withLock {
+                inFlight in
+                inFlight.removeValue(forKey: remoteID)
+            }
+            if let dead {
+                self.lockedAwaitingInbound.withLock { messages in
+                    for d in dead {
+                        let m = messages.removeValue(forKey: d)
+                        m?.resume(
+                            throwing: WebSocketSystemError.message(
+                                "Connection Closed"))
+                    }
+                }
+            }
+        }
     }
 
     public func assignID<Act>(_ actorType: Act.Type) -> ActorID
@@ -464,14 +548,6 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     public func makeInvocationEncoder() -> InvocationEncoder {
         logger.trace(#function)
         return CallEncoder(actorSystem: self, logLevel: logger.logLevel)
-    }
-
-    let lockedAwaitingInbound: Mutex<[UUID: MailboxMessage]> = Mutex([:])
-
-    struct OutGoingMessage {
-        let id: UUID
-        let frame: WebSocketFrame
-        let continuation: MailboxMessage
     }
 
     public func remoteCallVoid<Act, Err>(

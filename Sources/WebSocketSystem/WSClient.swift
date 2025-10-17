@@ -16,6 +16,7 @@ func connect(host: String, port: Int, uri: String) async throws -> ClientUpgrade
     let upgradeResult: EventLoopFuture<ClientUpgradeResult> = try await ClientBootstrap(
         group: .singletonMultiThreadedEventLoopGroup
     )
+    .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
     .connect(
         host: host,
         port: port
