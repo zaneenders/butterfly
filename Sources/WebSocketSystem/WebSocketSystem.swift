@@ -5,21 +5,7 @@ import NIOCore
 import NIOWebSocket
 import Synchronization
 
-typealias MailboxMessage = CheckedContinuation<any Sendable & Codable, any Error>
-
-public struct WebSocketActorId: Sendable, Codable, Hashable {
-    public init(host: String, port: Int) {
-        if host == "localhost" {
-            // TODO: support ipv4 or don't encode localhost
-            self.host = "::1"
-        } else {
-            self.host = host
-        }
-        self.port = port
-    }
-    public let host: String
-    public let port: Int
-}
+typealias MailboxPayload = CheckedContinuation<any Sendable & Codable, any Error>
 
 public final class WebSocketSystem: DistributedActorSystem, Sendable {
     public typealias ActorID = WebSocketActorId
@@ -28,40 +14,21 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     public typealias ResultHandler = Handler
     public typealias SerializationRequirement = Codable & Sendable
     private let logger: Logger
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
-
-    private let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
-    private let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
-    private let lockedAwaitingInbound: Mutex<[UUID: MailboxMessage]> = Mutex([:])
-    private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
-
-    struct OutGoingMessage {
-        let id: UUID
-        let frame: WebSocketFrame
-        let continuation: MailboxMessage
-    }
-
-    struct AwaitingInbound {
-        let id: UUID
-        let continuation: MailboxMessage
-    }
-
-    public enum Mode: Sendable {
-        case server
-        case client
-    }
-    public let mode: Mode
-    public let host: String
-    public let port: Int
+    internal let encoder: JSONEncoder
+    internal let decoder: JSONDecoder
 
     private let serverChannel: NIOAsyncChannel<EventLoopFuture<ServerUpgradeResult>, Never>?
     private let clientChannel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>?
 
-    public enum Config {
-        case client(host: String, port: Int, uri: String)
-        case server(host: String, port: Int, uri: String)
-    }
+    internal let messageQueue: WebSocketSystem.OutgoingMessageQueue = OutgoingMessageQueue()
+    private let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
+    private let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
+    private let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
+    private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
+
+    public let mode: Mode
+    public let host: String
+    public let port: Int
 
     public init(_ mode: Config, logLevel: Logger.Level) async throws {
         let id: WebSocketActorId
@@ -180,7 +147,6 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                             await withTaskGroup { group in
                                                 group.addTask {
                                                     do {
-
                                                         connection: for try await frame in inbound {
                                                             switch frame.opcode {
                                                             case .text:
@@ -597,6 +563,30 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         return CallEncoder(actorSystem: self, logLevel: logger.logLevel)
     }
 
+    private func _encodeAndSend<Act>(
+        on actor: Act,
+        message: WebSocketMessage
+    ) async throws -> SerializationRequirement
+    where Act: DistributedActor, WebSocketActorId == Act.ID {
+        let payload = try encoder.encode(message)
+
+        guard let json = String(data: payload, encoding: .utf8) else {
+            throw WebSocketSystemError.message("Could not find json")
+        }
+
+        let frame = WebSocketFrame(
+            fin: true, opcode: .text, data: ByteBuffer(string: json))
+
+        let value = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<any SerializationRequirement, any Error>) in
+            let m = OutGoingMessage(id: message.messageID, frame: frame, continuation: continuation)
+            Task.immediate {
+                await messageQueue.enqueue(m, for: actor.id)
+            }
+        }
+        return value
+    }
+
     public func remoteCallVoid<Act, Err>(
         on actor: Act,
         target: RemoteCallTarget,
@@ -616,29 +606,16 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             returnTypeName: nil,
             throwingTypeName: errorName)
 
-        let payload = try encoder.encode(msg)
+        let value: any WebSocketSystem.SerializationRequirement = try await _encodeAndSend(
+            on: actor, message: msg)
 
-        guard let json = String(data: payload, encoding: .utf8) else {
-            throw WebSocketSystemError.message("Could not find json")
-        }
-
-        let frame = WebSocketFrame(
-            fin: true, opcode: .text, data: ByteBuffer(string: json))
-
-        let value = try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<any SerializationRequirement, any Error>) in
-            let m = OutGoingMessage(id: msg.messageID, frame: frame, continuation: continuation)
-            Task.immediate {
-                await messageQueue.enqueue(m, for: actor.id)
-            }
-        }
         guard let jsonRsp = value as? String else {
             throw WebSocketSystemError.message("Failed to view json string \(type(of: value))")
         }
-        if jsonRsp == voidReturnMarker {
+        if jsonRsp == Handler.voidReturnMarker {
             return
         }
-        let data = jsonRsp.data(using: .utf8)!
+        let data: Data = jsonRsp.data(using: .utf8)!
         do {
             let rsp: RemoteWSErrorMessage = try self.decoder.decode(
                 RemoteWSErrorMessage.self, from: data)
@@ -679,22 +656,8 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             returnTypeName: respName,
             throwingTypeName: errorName)
 
-        let payload = try self.encoder.encode(msg)
-
-        guard let json = String(data: payload, encoding: .utf8) else {
-            throw WebSocketSystemError.message("Cloud not decdoe json")
-        }
-        let frame = WebSocketFrame(
-            fin: true, opcode: .text, data: ByteBuffer(string: json))
-
-        // Throws if there was a networking error.
-        let value = try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<any SerializationRequirement, any Error>) in
-            let m = OutGoingMessage(id: msg.messageID, frame: frame, continuation: continuation)
-            Task.immediate {
-                await messageQueue.enqueue(m, for: actor.id)
-            }
-        }
+        let value: any WebSocketSystem.SerializationRequirement = try await _encodeAndSend(
+            on: actor, message: msg)
 
         // We are never getting to here.
         guard let jsonRsp = value as? String else {
@@ -719,249 +682,6 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             }
         }
     }
-
-    let messageQueue = OutgoingMessageQueue()
-
-    actor OutgoingMessageQueue {
-        private var continuation: AsyncStream<Void>.Continuation
-        private var mailbox: [ActorID: [OutGoingMessage]] = [:]
-
-        let stream: AsyncStream<Void>
-
-        init() {
-            (stream, continuation) = AsyncStream.makeStream()
-        }
-
-        func enqueue(_ message: OutGoingMessage, for actor: ActorID) {
-            mailbox[actor, default: []].append(message)
-            continuation.yield()
-        }
-
-        func dequeueAll(for actor: ActorID) -> [OutGoingMessage]? {
-            defer { continuation.yield() }
-            return mailbox.removeValue(forKey: actor)
-        }
-    }
 }
 
-extension WebSocketSystem {
 
-    public struct CallEncoder: DistributedTargetInvocationEncoder {
-
-        public typealias SerializationRequirement = Sendable & Codable
-
-        private let logger: Logger
-        private let actorSystem: WebSocketSystem
-        private(set) var genericSubs: [String] = []
-        private(set) var argumentData: [Data] = []
-        private(set) var returnType: String?
-        private(set) var throwType: String?
-
-        init(actorSystem: WebSocketSystem, logLevel: Logger.Level) {
-            self.logger = Logger.create(label: "CallEncoder", logLevel: logLevel)
-            self.actorSystem = actorSystem
-        }
-
-        public mutating func recordArgument<Value: SerializationRequirement>(
-            _ argument: RemoteCallArgument<Value>
-        )
-            throws
-        {
-            let data = try actorSystem.encoder.encode(argument.value)
-            self.argumentData.append(data)
-        }
-
-        public mutating func recordGenericSubstitution<T>(_ type: T.Type) throws {
-            logger.trace(#function)
-            if let name = _mangledTypeName(type) {
-                genericSubs.append(name)
-            } else {
-                logger.critical(#function)
-                assert(false)
-            }
-        }
-
-        public mutating func recordErrorType<E>(_ type: E.Type) throws where E: Error {
-            logger.trace(#function)
-            if let name = _mangledTypeName(type) {
-                throwType = name
-            } else {
-                logger.critical(#function)
-                assert(false)
-            }
-        }
-
-        public mutating func recordReturnType<R: SerializationRequirement>(_ type: R.Type) throws {
-            logger.trace(#function)
-            if let name = _mangledTypeName(type) {
-                returnType = name
-            } else {
-                logger.critical(#function)
-                assert(false)
-            }
-        }
-
-        public mutating func doneRecording() throws {
-            logger.trace(#function)
-        }
-    }
-
-    public struct CallDecoder: DistributedTargetInvocationDecoder {
-        public typealias SerializationRequirement = Sendable & Codable
-
-        let logger: Logger
-        let message: WebSocketMessage
-        let decoder: JSONDecoder
-        var argumentsIterator: Array<Data>.Iterator
-
-        init(message: WebSocketMessage, decoder: JSONDecoder, logLevel: Logger.Level) {
-            self.logger = Logger.create(label: "CallDecoder", logLevel: logLevel)
-            self.message = message
-            self.decoder = decoder
-            self.argumentsIterator = message.arguments.makeIterator()
-        }
-
-        public mutating func decodeGenericSubstitutions() throws -> [any Any.Type] {
-            logger.trace(#function)
-            return message.genericSubstitutions.compactMap { name in
-                _typeByName(name)
-            }
-        }
-
-        public mutating func decodeErrorType() throws -> (any Any.Type)? {
-            if let r = message.throwingTypeName {
-                logger.trace("\(#function) \(r)")
-                return _typeByName(r)
-            } else {
-                logger.error(#function)
-                return nil
-            }
-        }
-
-        public mutating func decodeReturnType() throws -> (any Any.Type)? {
-            if let r = message.returnTypeName {
-                logger.trace("\(#function) \(r)")
-                return _typeByName(r)
-            } else {
-                logger.trace("\(#function) nil")
-                return nil
-            }
-        }
-
-        public mutating func decodeNextArgument<Argument: SerializationRequirement>() throws
-            -> Argument
-        {
-            guard let data = argumentsIterator.next() else {
-                logger.error(#function)
-                throw WebSocketSystemError.message("out of arguments")
-            }
-            do {
-                let value = try decoder.decode(Argument.self, from: data)
-                logger.trace("\(#function) \(value)")
-                return value
-            } catch {
-                logger.error("\(#function) \(error)")
-                throw error
-            }
-        }
-    }
-
-    public struct Handler: DistributedTargetInvocationResultHandler {
-        public typealias SerializationRequirement = Sendable & Codable
-
-        let id: UUID
-        let logger: Logger
-        let encoder: JSONEncoder
-        let outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
-
-        init(
-            id: UUID,
-            outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>,
-            encoder: JSONEncoder,
-            logLevel: Logger.Level
-        ) {
-            self.id = id
-            self.logger = Logger.create(label: "Handler", logLevel: logLevel)
-            self.encoder = encoder
-            self.outbound = outbound
-        }
-
-        public func onReturn<Success: SerializationRequirement>(value: Success) async throws {
-            logger.trace("\(#function)")
-            // Need to send the messageID or something
-            let vdata = try encoder.encode(value)
-            let vjson = String(data: vdata, encoding: .utf8)!
-            let rsp = ResponseJSONMessage(id: id, json: vjson)
-            let data = try encoder.encode(rsp)
-            let json = String(data: data, encoding: .utf8)!
-            let frame = WebSocketFrame(
-                fin: true, opcode: .text, data: ByteBuffer(string: json))
-            do {
-                try await outbound.write(frame)
-            } catch {
-                logger.error("\(#function)\(error)")
-                throw error
-            }
-        }
-
-        public func onReturnVoid() async throws {
-            logger.trace("\(#function)")
-            let vdata = try encoder.encode(voidReturnMarker)
-            let vjson = String(data: vdata, encoding: .utf8)!
-            let rsp = ResponseJSONMessage(id: id, json: vjson)
-            let data = try encoder.encode(rsp)
-            let json = String(data: data, encoding: .utf8)!
-            let frame = WebSocketFrame(
-                fin: true, opcode: .text, data: ByteBuffer(string: json))
-            do {
-                try await outbound.write(frame)
-                return
-            } catch {
-                logger.error("\(#function)\(error)")
-                throw error
-            }
-        }
-
-        public func onThrow<Err>(error: Err) async throws where Err: Error {
-            logger.trace("\(#function)")
-            // TODO: Return the actual arror
-            let re = RemoteWSErrorMessage(message: "\(error)")
-            let data = try encoder.encode(re)
-            let json = String(data: data, encoding: .utf8)!
-            let frame = WebSocketFrame(
-                fin: true, opcode: .text, data: ByteBuffer(string: json))
-            do {
-                try await outbound.write(frame)
-                return
-            } catch {
-                logger.error("\(#function)\(error)")
-                throw error
-            }
-        }
-    }
-}
-
-let voidReturnMarker = "VOID"
-
-struct ResponseJSONMessage: Codable, Sendable {
-    let id: UUID
-    let json: String
-}
-
-struct WebSocketMessage: Codable, Sendable {
-    let messageID: UUID
-    let actorID: WebSocketActorId
-    let target: String
-    let genericSubstitutions: [String]
-    let arguments: [Data]
-    let returnTypeName: String?
-    let throwingTypeName: String?
-}
-
-struct RemoteWSErrorMessage: Error, Equatable, Sendable, Codable {
-    let message: String
-}
-
-enum WebSocketSystemError: Error {
-    case message(String)
-}

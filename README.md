@@ -19,3 +19,14 @@ swift test --enable-code-coverage
 
 llvm-cov report .build/debug/butterflyPackageTests.xctest --instr-profile=.build/debug/codecov/default.profdata --ignore-filename-regex='(.build|Tests)[/\\].*' 
 ```
+
+# Deployment 
+
+## [Static Linux SDK](https://www.swift.org/documentation/articles/static-linux-getting-started.html)
+
+Trying to keep the project able to staticly compile for linux.
+
+```
+swift build --swift-sdk aarch64-swift-linux-musl
+swift build --swift-sdk x86_64-swift-linux-musl
+```
