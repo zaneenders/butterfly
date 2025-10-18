@@ -281,6 +281,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         frame: WebSocketFrame,
         outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
     ) async throws {
+        assert(frame.opcode == .ping)
         self.logger.trace("Received ping sending pong")
         var frameData = frame.data
         let maskingKey = frame.maskKey
