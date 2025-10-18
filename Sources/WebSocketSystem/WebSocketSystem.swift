@@ -160,30 +160,45 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             return
         case .websocket(let wsChannel):
             do {
-                let remoteID = try wsChannel.channel.remoteAddress.getID(
+                let remoteId = try wsChannel.channel.remoteAddress.getID(
                     self.logger)
                 try await wsChannel.executeThenClose {
                     inbound,
                     outbound in
                     await withTaskGroup { group in
                         group.addTask {
-                            await self._handleServerFrames(
-                                remoteId: remoteID,
-                                inbound: inbound,
-                                outbound: outbound)
+                            do {
+                                try await self._handleServerFrames(
+                                    remoteId: remoteId,
+                                    inbound: inbound,
+                                    outbound: outbound)
+                            } catch {
+                                self.logger.error(
+                                    "Message loop closed for \(remoteId): \(error)"
+                                )
+                            }
                         }
                         group.addTask {
                             await self.drainMesasges(
-                                remoteID: remoteID, with: outbound)
+                                remoteID: remoteId, with: outbound)
                         }
                         group.addTask {
-                            await self._sendPings(outbound: outbound)
+                            do {
+                                try await self._sendPings(outbound: outbound)
+                            } catch {
+                                try? await outbound.write(
+                                    WebSocketFrame(
+                                        fin: true, opcode: .connectionClose, data: ByteBuffer()))
+                                self.logger.warning(
+                                    "failed to send ping to \(remoteId), closing down.")
+                                return
+                            }
                         }
-                        self.cleanUp(for: remoteID)
                         await group.next()
                         group.cancelAll()
                     }
                 }
+                self.cleanUp(for: remoteId)
             } catch {
                 self.logger.error("Error with Websocket connection: \(error)")
             }
@@ -198,41 +213,44 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                 let remoteID = try clientChannel!.channel.remoteAddress.getID(self.logger)
                 await withTaskGroup { group in
                     group.addTask {
-                        await self._handleClientFrames(
-                            remoteId: remoteID, inbound: inbound, outbound: outbound)
+                        do {
+                            try await self._handleClientFrames(
+                                remoteId: remoteID, inbound: inbound, outbound: outbound)
+                        } catch {
+                            self.logger.error("Web socket message loop threw: \(error)")
+                            try? await outbound.write(
+                                WebSocketFrame(
+                                    fin: true, opcode: .connectionClose, data: ByteBuffer()))
+                            return
+                        }
                     }
                     group.addTask {
                         await self.drainMesasges(remoteID: remoteID, with: outbound)
                     }
                     await group.next()
                     group.cancelAll()
-                    self.cleanUp(for: remoteID)
                 }
+                self.cleanUp(for: remoteID)
             }
         } catch {
             self.logger.critical("_runAsClient threw: \(error)")
         }
     }
 
-    private func _sendPings(outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>) async {
+    private func _sendPings(outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>) async throws {
         while true {
-            do {
-                let theTime = ContinuousClock().now
-                var buffer = ByteBuffer()
-                buffer.writeString("\(theTime)")
+            let theTime = ContinuousClock().now
+            var buffer = ByteBuffer()
+            buffer.writeString("\(theTime)")
 
-                let frame = WebSocketFrame(
-                    fin: true, opcode: .ping,
-                    data: buffer)
+            let frame = WebSocketFrame(
+                fin: true, opcode: .ping,
+                data: buffer)
 
-                self.logger.trace(
-                    "Sending time: \(theTime)")
-                try await outbound.write(frame)
-                try await Task.sleep(for: .seconds(1))
-            } catch {
-                self.logger.warning(
-                    "failed ot send ping: \(error)")
-            }
+            self.logger.trace(
+                "Sending time: \(theTime)")
+            try await outbound.write(frame)
+            try await Task.sleep(for: .seconds(1))
         }
     }
 
@@ -240,41 +258,36 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         remoteId: WebSocketActorId,
         inbound: NIOAsyncChannelInboundStream<WebSocketFrame>,
         outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
-    ) async {
-        do {
-            connection: for try await frame in inbound {
-                switch frame.opcode {
-                case .text:
-                    try await handleTextFrame(remoteId: remoteId, frame: frame, outbound: outbound)
-                case .ping:
-                    try await recievedPingSendPing(frame: frame, outbound: outbound)
-                case .connectionClose:
-                    self.logger.trace("Received close")
-                    var data = frame.unmaskedData
-                    let closeDataCode =
-                        data.readSlice(length: 2)
-                        ?? ByteBuffer()
-                    let closeFrame = WebSocketFrame(
-                        fin: true,
-                        opcode: .connectionClose,
-                        data: closeDataCode)
-                    try await outbound.write(closeFrame)
-                    return
-                case .binary, .continuation, .pong:
-                    self.logger.trace(
-                        "opcode: \(frame.opcode)")
-                    break
-                default:
-                    self.logger.critical(
-                        "opcode: \(frame.opcode)")
-                    return
-                }
+    ) async throws {
+        connection: for try await frame in inbound {
+            switch frame.opcode {
+            case .text:
+                try await handleTextFrame(remoteId: remoteId, frame: frame, outbound: outbound)
+            case .ping:
+                try await recievedPingSendPing(frame: frame, outbound: outbound)
+            case .connectionClose:
+                self.logger.trace("Received close")
+                var data = frame.unmaskedData
+                let closeDataCode =
+                    data.readSlice(length: 2)
+                    ?? ByteBuffer()
+                let closeFrame = WebSocketFrame(
+                    fin: true,
+                    opcode: .connectionClose,
+                    data: closeDataCode)
+                try await outbound.write(closeFrame)
+                return
+            case .binary, .continuation, .pong:
+                self.logger.trace(
+                    "opcode: \(frame.opcode)")
+                break
+            default:
+                self.logger.critical(
+                    "opcode: \(frame.opcode)")
+                return
             }
-        } catch {
-            self.logger.error(
-                "Message loop closed for \(remoteId): \(error)"
-            )
         }
+
     }
 
     private func recievedPingSendPing(
@@ -312,7 +325,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             let continuation = self
                 .lockedAwaitingInbound.withLock {
                     mailBox in
-                    self.logger.warning("mailBox: \(mailBox)")
+                    self.logger.trace("continuation for \(callBack.id)")
                     return mailBox.removeValue(forKey: callBack.id)
                 }
             _ = self.lockedMessagesInflight.withLock {
@@ -367,31 +380,27 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         remoteId: WebSocketActorId,
         inbound: NIOAsyncChannelInboundStream<WebSocketFrame>,
         outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
-    ) async {
-        do {
-            let pingFrame = WebSocketFrame(
-                fin: true, opcode: .ping, data: ByteBuffer(string: ""))
-            try await outbound.write(pingFrame)
-            connection: for try await frame in inbound {
-                switch frame.opcode {
-                case .pong, .ping:
-                    self.logger.trace(
-                        "Received \(frame.opcode): \(String(buffer: frame.data))")
-                case .text:
-                    try await handleTextFrame(remoteId: remoteId, frame: frame, outbound: outbound)
-                case .binary, .continuation:
-                    self.logger.trace("opcode: \(frame.opcode)")
-                    break
-                case .connectionClose:
-                    self.logger.warning("Received Close instruction from server")
-                    return
-                default:
-                    self.logger.critical("opcode: \(frame.opcode)")
-                    return
-                }
+    ) async throws {
+        let pingFrame = WebSocketFrame(
+            fin: true, opcode: .ping, data: ByteBuffer(string: ""))
+        try await outbound.write(pingFrame)
+        connection: for try await frame in inbound {
+            switch frame.opcode {
+            case .pong, .ping:
+                self.logger.trace(
+                    "Received \(frame.opcode): \(String(buffer: frame.data))")
+            case .text:
+                try await handleTextFrame(remoteId: remoteId, frame: frame, outbound: outbound)
+            case .binary, .continuation:
+                self.logger.trace("opcode: \(frame.opcode)")
+                break
+            case .connectionClose:
+                self.logger.warning("Received Close instruction from server")
+                return
+            default:
+                self.logger.critical("opcode: \(frame.opcode)")
+                return
             }
-        } catch {
-            self.logger.error("Web socket message loop threw: \(error)")
         }
     }
 

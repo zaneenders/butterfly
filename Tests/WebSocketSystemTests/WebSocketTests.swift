@@ -124,7 +124,8 @@ struct WebSocketTests {
     }
 
     // TODO: Still some issues with tear down I think.
-    @Test(.disabled("Websocket reconnection problem")) func connectDisconnect() async throws {
+    @Test(.disabled("Websocket cleaup/reconnection problem")) func connectDisconnect() async throws
+    {
         let host = "::1"
         let port = 7002
         let serverSystem = try await WebSocketSystem(
@@ -149,7 +150,6 @@ struct WebSocketTests {
         )
         clientSystem2.background()
         let serverConnection2 = try Backend.resolve(id: server.id, using: clientSystem2)
-        // Create actor instances and assign them to an actorsystem.
         let id2 = try await serverConnection2.doWork(69)
         #expect(id2 == id)
         clientSystem2.shutdown()

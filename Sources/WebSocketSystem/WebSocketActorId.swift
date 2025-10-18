@@ -11,3 +11,9 @@ public struct WebSocketActorId: Sendable, Codable, Hashable {
     public let host: String
     public let port: Int
 }
+
+extension WebSocketActorId: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        "ActorId[\(host):\(port)]"
+    }
+}
