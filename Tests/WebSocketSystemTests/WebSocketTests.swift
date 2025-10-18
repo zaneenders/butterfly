@@ -1,7 +1,8 @@
 import Distributed
 import Logging
 import Testing
-import WebSocketSystem
+
+@testable import WebSocketSystem
 
 let logLevel: Logger.Level = .error
 @Suite
@@ -130,19 +131,14 @@ struct WebSocketTests {
             .server(host: host, port: port, uri: "/"), logLevel: logLevel
         )
         serverSystem.background()
+        // This isn't needed i don't think.
+        let server = Backend(actorSystem: serverSystem)
 
         let clientSystem = try await WebSocketSystem(
             .client(host: host, port: port, uri: "/"), logLevel: logLevel
         )
         clientSystem.background()
-
-        // Create actor instances and assign them to an actorsystem.
-        let server = Backend(actorSystem: serverSystem)
-
-        // Get remote references. Simulating a another computer being able to perform remote calls on another node.
-        // For now the id is just the host and port of the node.
         let serverConnection = try Backend.resolve(id: server.id, using: clientSystem)
-        // Various remote calls that are server through the WebSocket connection.
         let id = try await serverConnection.doWork(69)
         #expect(id == 69)
         clientSystem.shutdown()
