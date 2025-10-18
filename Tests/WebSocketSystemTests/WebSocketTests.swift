@@ -4,7 +4,7 @@ import Testing
 
 @testable import WebSocketSystem
 
-@Suite(.disabled())  // TODO: Still working on concurrency bug.
+@Suite  // TODO: Still working on concurrency bug.
 struct WebSocketSystemTests {
     let logLevel: Logger.Level = .trace
 
@@ -30,6 +30,12 @@ struct WebSocketSystemTests {
 
         serverSystem.lockedActors.withLock { actors in
             #expect(actors.count == 0)
+        }
+        serverSystem.lockedAwaitingInbound.withLock { mailBox in
+            #expect(mailBox.count == 0)
+        }
+        serverSystem.lockedMessagesInflight.withLock { inFlight in
+            #expect(inFlight.count == 0)
         }
 
         let clientSystem2 = try await WebSocketSystem(

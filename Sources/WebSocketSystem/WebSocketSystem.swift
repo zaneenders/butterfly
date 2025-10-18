@@ -21,7 +21,15 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     private let clientChannel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>?
 
     internal let messageQueue: WebSocketSystem.OutgoingMessageQueue = OutgoingMessageQueue()
-    internal let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
+    final class WeakRef {
+        weak var actor: (any DistributedActor)?
+
+        init<Act: DistributedActor>(_ actor: Act) where Act.ID == WebSocketSystem.ActorID {
+            self.actor = actor
+        }
+    }
+
+    internal let lockedActors: Mutex<[WebSocketActorId: WeakRef]> = Mutex([:])
     internal let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
     internal let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
     private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
@@ -94,7 +102,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             task?.cancel()
             return task
         }
-        self.logger.notice("\(String(describing: t))")
+        self.logger.notice("\(#function)\(String(describing: t))")
         Task.immediate {
             await t?.value
         }
@@ -198,7 +206,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                         group.cancelAll()
                     }
                 }
-                self.cleanUp(for: remoteId)
+                _ = self.cleanUp(for: remoteId)
             } catch {
                 self.logger.error("Error with Websocket connection: \(error)")
             }
@@ -230,7 +238,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                     await group.next()
                     group.cancelAll()
                 }
-                self.cleanUp(for: remoteID)
+                _ = self.cleanUp(for: remoteID)
             }
         } catch {
             self.logger.critical("_runAsClient threw: \(error)")
@@ -347,7 +355,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         }
         self.logger.trace("\(networkMessage)")
         let actor = self.lockedActors.withLock { actors in
-            return actors[networkMessage.actorID]
+            return actors[networkMessage.actorID]?.actor
         }
         self.logger.trace("\(String(describing: actor))")
         guard let actor else {
@@ -404,8 +412,12 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         }
     }
 
-    private func cleanUp(for remoteID: WebSocketActorId) {
+    private func cleanUp(for remoteID: WebSocketActorId) -> (any DistributedActor)? {
         self.logger.notice("Cleaning up for: \(remoteID) connection closed.")
+        let deadActor = lockedActors.withLock { actors in
+            actors.removeValue(forKey: remoteID)?.actor
+        }
+        self.logger.trace("Removed \(remoteID) \(deadActor != nil)")
         let dead = self.lockedMessagesInflight.withLock {
             inFlight in
             inFlight.removeValue(forKey: remoteID)
@@ -420,6 +432,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                 }
             }
         }
+        return deadActor
     }
 
     public func assignID<Act>(_ actorType: Act.Type) -> ActorID
@@ -431,21 +444,13 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     public func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
         logger.trace("\(#function) \(actor.id)")
         lockedActors.withLock { actors in
-            // TODO: upgrade to weak reference
-            actors[actor.id] = actor
+            actors[actor.id] = WeakRef(actor)
         }
     }
 
     public func resignID(_ id: ActorID) {
-        self.cleanUp(for: id)
-        let deadActor = lockedActors.withLock { actors in
-            actors.removeValue(forKey: id)
-        }
-        guard deadActor != nil else {
-            fatalError("Went to remove id: \(id), but no actor found by that id.")
-            // NOTE: This is a programming error
-        }
-        logger.trace(#function)
+        let deadActor = self.cleanUp(for: id)
+        logger.trace("\(#function) removed: \(deadActor != nil)")
     }
 
     public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?

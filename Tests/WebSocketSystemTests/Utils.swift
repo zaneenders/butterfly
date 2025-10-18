@@ -11,12 +11,7 @@ distributed actor Backend {
     }
 
     distributed func doWork(_ work: Int) -> Int {
-        switch logLevel {
-        case .error:
-            ()
-        default:
-            print("Backend", actorSystem.host, actorSystem.port, "Doing work...")
-        }
+        testLog("Backend \(actorSystem.host) \(actorSystem.port)Received Doing work...", logLevel)
         return work
     }
 
@@ -34,11 +29,16 @@ distributed actor Client {
     }
 
     distributed func sendResult(_ msg: String) {
-        switch logLevel {
-        case .error:
-            ()
-        default:
-            print("Client", actorSystem.host, actorSystem.port, "Received result: \(msg)")
-        }
+        testLog("Client \(actorSystem.host) \(actorSystem.port)Received result: \(msg)", logLevel)
+    }
+
+    deinit {
+        testLog("Client \(actorSystem.host) \(actorSystem.port)DEINIT", logLevel)
+    }
+}
+
+func testLog(_ message: String, _ logLevel: Logger.Level) {
+    if logLevel <= .debug {
+        print(message)
     }
 }
