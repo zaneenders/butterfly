@@ -65,7 +65,7 @@ extension WebSocketSystem {
 
         public func onThrow<Err>(error: Err) async throws where Err: Error {
             logger.trace("\(#function)")
-            // TODO: Return the actual arror
+            // TODO: Return the actual error
             let re = RemoteWSErrorMessage(message: "\(error)")
             let data = try encoder.encode(re)
             let json = String(data: data, encoding: .utf8)!

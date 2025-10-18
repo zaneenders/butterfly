@@ -21,7 +21,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     private let clientChannel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>?
 
     internal let messageQueue: WebSocketSystem.OutgoingMessageQueue = OutgoingMessageQueue()
-    private let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
+    internal let lockedActors: Mutex<[WebSocketActorId: any DistributedActor]> = Mutex([:])
     internal let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
     internal let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
     private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
@@ -138,7 +138,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                     let connection = try await upgradeResult.get()
                                     await self._serverHandle(connection: connection)
                                 } catch {
-                                    self.logger.notice("Client disonncted: \(error)")
+                                    self.logger.notice("Client disconnected: \(error)")
                                 }
                             }
                         }
@@ -179,7 +179,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                             }
                         }
                         group.addTask {
-                            await self.drainMesasges(
+                            await self.drainMessages(
                                 remoteID: remoteId, with: outbound)
                         }
                         group.addTask {
@@ -225,7 +225,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                         }
                     }
                     group.addTask {
-                        await self.drainMesasges(remoteID: remoteID, with: outbound)
+                        await self.drainMessages(remoteID: remoteID, with: outbound)
                     }
                     await group.next()
                     group.cancelAll()
@@ -264,7 +264,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             case .text:
                 try await handleTextFrame(remoteId: remoteId, frame: frame, outbound: outbound)
             case .ping:
-                try await recievedPingSendPing(frame: frame, outbound: outbound)
+                try await receivedPingSendPing(frame: frame, outbound: outbound)
             case .connectionClose:
                 self.logger.trace("Received close")
                 var data = frame.unmaskedData
@@ -290,7 +290,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
     }
 
-    private func recievedPingSendPing(
+    private func receivedPingSendPing(
         frame: WebSocketFrame,
         outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
     ) async throws {
@@ -429,11 +429,11 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
 
     public func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
+        logger.trace("\(#function) \(actor.id)")
         lockedActors.withLock { actors in
             // TODO: upgrade to weak reference
             actors[actor.id] = actor
         }
-        logger.trace(#function)
     }
 
     public func resignID(_ id: ActorID) {
@@ -579,7 +579,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             } catch let expected as WebSocketSystemError {
                 throw expected
             } catch {
-                throw WebSocketSystemError.message("Invalid reponse")
+                throw WebSocketSystemError.message("Invalid response")
             }
         }
     }

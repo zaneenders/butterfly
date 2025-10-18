@@ -25,7 +25,7 @@ extension WebSocketSystem {
 }
 
 extension WebSocketSystem {
-    func drainMesasges(
+    func drainMessages(
         remoteID: WebSocketActorId,
         with outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
     ) async {
