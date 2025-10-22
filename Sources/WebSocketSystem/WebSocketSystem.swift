@@ -485,7 +485,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
         let value = try await withCheckedThrowingContinuation {
             (continuation: CheckedContinuation<any SerializationRequirement, any Error>) in
-            let m = OutGoingMessage(id: message.messageID, frame: frame, continuation: continuation)
+            let m = OutgoingMessage(id: message.messageID, frame: frame, continuation: continuation)
             Task.immediate {
                 await messageQueue.enqueue(m, for: actor.id)
             }

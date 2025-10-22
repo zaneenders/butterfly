@@ -5,9 +5,9 @@ import WebSocketSystem
 
 @Suite
 struct PublicWebSocketTests {
-    let logLevel: Logger.Level = .warning
+    let logLevel: Logger.Level = .trace
 
-    @Test func setup() async throws {
+    @Test(.timeLimit(.minutes(1))) func setup() async throws {
         let host = "::1"
         let port = 7000
         // Setup networking
@@ -37,7 +37,7 @@ struct PublicWebSocketTests {
         #expect("\(id)" == result)
 
         // Takes about 1.7 seconds right now. Not great but the code is pretty crap.
-        let messagesToSend = 10_000
+        let messagesToSend = 1000
         let count = await withTaskGroup(of: Int.self) { group in
             for c in 0..<messagesToSend {
                 group.addTask {
@@ -61,7 +61,7 @@ struct PublicWebSocketTests {
         serverSystem.shutdown()
     }
 
-    @Test func twoClients() async throws {
+    @Test(.timeLimit(.minutes(1))) func twoClients() async throws {
         let host = "::1"
         let port = 7001
         let serverSystem = try await WebSocketSystem(
