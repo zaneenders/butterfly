@@ -28,14 +28,14 @@ struct WebSocketSystemTests {
         #expect(id == 69)
         clientSystem.shutdown()
 
-        // Server should have no references or messages inflight at this point.
-        serverSystem.lockedActors.withLock { actors in
+        // Client should have no actors left after shutdown.
+        clientSystem.lockedActors.withLock { actors in
             #expect(actors.count == 0)
         }
-        serverSystem.lockedAwaitingInbound.withLock { mailBox in
+        clientSystem.lockedAwaitingInbound.withLock { mailBox in
             #expect(mailBox.count == 0)
         }
-        serverSystem.lockedMessagesInflight.withLock { inFlight in
+        clientSystem.lockedMessagesInflight.withLock { inFlight in
             #expect(inFlight.count == 0)
         }
 
@@ -47,6 +47,29 @@ struct WebSocketSystemTests {
         let id2 = try await serverConnection2.doWork(69)
         #expect(id2 == id)
         clientSystem2.shutdown()
+
+        // Client2 should have no actors left after shutdown.
+        clientSystem2.lockedActors.withLock { actors in
+            #expect(actors.count == 0)
+        }
+        clientSystem2.lockedAwaitingInbound.withLock { mailBox in
+            #expect(mailBox.count == 0)
+        }
+        clientSystem2.lockedMessagesInflight.withLock { inFlight in
+            #expect(inFlight.count == 0)
+        }
+
         serverSystem.shutdown()
+
+        // Server should have no actors left after shutdown.
+        serverSystem.lockedActors.withLock { actors in
+            #expect(actors.count == 0)
+        }
+        serverSystem.lockedAwaitingInbound.withLock { mailBox in
+            #expect(mailBox.count == 0)
+        }
+        serverSystem.lockedMessagesInflight.withLock { inFlight in
+            #expect(inFlight.count == 0)
+        }
     }
 }

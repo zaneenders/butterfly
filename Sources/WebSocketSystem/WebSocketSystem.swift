@@ -23,12 +23,12 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     final class WeakRef {
         weak var actor: (any DistributedActor)?
 
-        init<Act: DistributedActor>(_ actor: Act) where Act.ID == WebSocketSystem.ActorID {
+        init(_ actor: any DistributedActor) {
             self.actor = actor
         }
     }
 
-    internal let lockedActors: Mutex<[WebSocketActorId: WeakRef]> = Mutex([:])
+    internal let lockedActors: Mutex<[Address: WeakRef]> = Mutex([:])
     internal let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
     internal let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
     internal let lockedOutbounds: Mutex<[Address: NIOAsyncChannelOutboundWriter<WebSocketFrame>]> = Mutex([:])
@@ -92,11 +92,29 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
 
     public func shutdown() {
+        lockedOutbounds.withLock { outbounds in
+            let frame = WebSocketFrame(fin: true, opcode: .connectionClose, data: ByteBuffer())
+            for outbound in outbounds.values {
+                Task.immediate {
+                    do {
+                        try await outbound.write(frame)
+                    } catch {
+                        self.logger.trace("Failed to send close frame: \(error)")
+                    }
+                }
+            }
+        }
         lockedAwaitingInbound.withLock { messages in
             for message in messages {
                 let value = messages.removeValue(forKey: message.key)
                 value?.resume(throwing: WebSocketSystemError.message("Shutting down"))
             }
+        }
+        lockedActors.withLock { actors in
+            actors.removeAll()
+        }
+        lockedMessagesInflight.withLock { inFlight in
+            inFlight.removeAll()
         }
         let t = backgroundTask.withLock { task in
             task?.cancel()
@@ -350,7 +368,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         }
         self.logger.trace("\(networkMessage)")
         let actor = self.lockedActors.withLock { actors in
-            return actors[networkMessage.actorID]?.actor
+            return actors[networkMessage.actorID.address]?.actor
         }
         self.logger.trace("\(String(describing: actor))")
         guard let actor else {
@@ -410,7 +428,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     private func cleanUp(for remoteID: WebSocketActorId) -> (any DistributedActor)? {
         self.logger.notice("Cleaning up for: \(remoteID) connection closed.")
         let deadActors = lockedActors.withLock { actors in
-            let keys = actors.keys.filter { $0.address == remoteID.address }
+            let keys = actors.keys.filter { $0 == remoteID.address }
             return keys.map { actors.removeValue(forKey: $0)?.actor }.compactMap { $0 }
         }
         let deadActor = deadActors.first
@@ -442,7 +460,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     public func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
         logger.trace("\(#function) \(actor.id)")
         lockedActors.withLock { actors in
-            actors[actor.id] = WeakRef(actor)
+            actors[actor.id.address] = WeakRef(actor)
         }
     }
 
@@ -454,7 +472,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
     where Act: DistributedActor, ActorID == Act.ID {
         let actor = lockedActors.withLock { actors in
-            actors[id]
+            actors[id.address]
         }
         let r = actor as? Act
         // TODO: delete these last two lines of code.
