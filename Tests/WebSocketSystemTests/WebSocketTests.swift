@@ -4,11 +4,10 @@ import Testing
 
 @testable import WebSocketSystem
 
-@Suite  // TODO: Still working on concurrency bug.
+@Suite
 struct WebSocketSystemTests {
-    let logLevel: Logger.Level = .trace
+    let logLevel: Logger.Level = .error
 
-    // TODO: Still some issues with tear down I think.
     @Test(.timeLimit(.minutes(1))) func connectDisconnect() async throws {
         let host = "::1"
         let port = 7002

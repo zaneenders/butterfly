@@ -5,7 +5,7 @@ import WebSocketSystem
 
 @Suite
 struct PublicWebSocketTests {
-    let logLevel: Logger.Level = .trace
+    let logLevel: Logger.Level = .error
 
     @Test(.timeLimit(.minutes(1))) func setup() async throws {
         let host = "::1"
