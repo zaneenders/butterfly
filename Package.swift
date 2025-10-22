@@ -62,6 +62,7 @@ let swiftSettings: [SwiftSetting] = [
     .enableUpcomingFeature("ExistentialAny"),
     .enableUpcomingFeature("MemberImportVisibility"),
     .enableUpcomingFeature("InternalImportsByDefault"),
+    .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
     .enableExperimentalFeature("Span"),
     .enableExperimentalFeature("LifetimeDependence"),
 ]
