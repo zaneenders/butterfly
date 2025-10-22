@@ -4,7 +4,7 @@ import NIOWebSocket
 extension WebSocketSystem {
     actor OutgoingMessageQueue {
         private var continuation: AsyncStream<Void>.Continuation
-        private var mailbox: [ActorID: [OutgoingMessage]] = [:]
+        private var mailbox: [Address: [OutgoingMessage]] = [:]
 
         let stream: AsyncStream<Void>
 
@@ -13,13 +13,13 @@ extension WebSocketSystem {
         }
 
         func enqueue(_ message: OutgoingMessage, for actor: ActorID) {
-            mailbox[actor, default: []].append(message)
+            mailbox[actor.address, default: []].append(message)
             continuation.yield()
         }
 
-        func dequeueAll(for actor: ActorID) -> [OutgoingMessage]? {
+        func dequeueAll(for remoteID: ActorID) -> [OutgoingMessage]? {
             defer { continuation.yield() }
-            return mailbox.removeValue(forKey: actor)
+            return mailbox.removeValue(forKey: remoteID.address)
         }
     }
 }

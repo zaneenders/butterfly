@@ -28,8 +28,9 @@ struct WebSocketSystemTests {
         #expect(id == 69)
         clientSystem.shutdown()
 
+        // Server should have no references or messages inflight at this point.
         serverSystem.lockedActors.withLock { actors in
-            #expect(actors.count == 1) // BUG: should this be 0?
+            #expect(actors.count == 0)
         }
         serverSystem.lockedAwaitingInbound.withLock { mailBox in
             #expect(mailBox.count == 0)
