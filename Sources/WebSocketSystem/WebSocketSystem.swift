@@ -20,7 +20,6 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     private let serverChannel: NIOAsyncChannel<EventLoopFuture<ServerUpgradeResult>, Never>?
     private let clientChannel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>?
 
-    internal let messageQueue: WebSocketSystem.OutgoingMessageQueue = OutgoingMessageQueue()
     final class WeakRef {
         weak var actor: (any DistributedActor)?
 
@@ -32,6 +31,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     internal let lockedActors: Mutex<[WebSocketActorId: WeakRef]> = Mutex([:])
     internal let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
     internal let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
+    internal let lockedOutbounds: Mutex<[Address: NIOAsyncChannelOutboundWriter<WebSocketFrame>]> = Mutex([:])
     private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
 
     public let mode: Mode
@@ -173,6 +173,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                 try await wsChannel.executeThenClose {
                     inbound,
                     outbound in
+                    lockedOutbounds.withLock { $0[remoteId.address] = outbound }
                     await withTaskGroup { group in
                         group.addTask {
                             do {
@@ -185,10 +186,6 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                     "Message loop closed for \(remoteId): \(error)"
                                 )
                             }
-                        }
-                        group.addTask {
-                            await self.drainMessages(
-                                remoteID: remoteId, with: outbound)
                         }
                         group.addTask {
                             do {
@@ -219,6 +216,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                 inbound,
                 outbound in
                 let remoteID = try clientChannel!.channel.remoteAddress.getID(self.logger)
+                lockedOutbounds.withLock { $0[remoteID.address] = outbound }
                 await withTaskGroup { group in
                     group.addTask {
                         do {
@@ -231,9 +229,6 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                                     fin: true, opcode: .connectionClose, data: ByteBuffer()))
                             return
                         }
-                    }
-                    group.addTask {
-                        await self.drainMessages(remoteID: remoteID, with: outbound)
                     }
                     await group.next()
                     group.cancelAll()
@@ -414,17 +409,20 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
     private func cleanUp(for remoteID: WebSocketActorId) -> (any DistributedActor)? {
         self.logger.notice("Cleaning up for: \(remoteID) connection closed.")
-        let deadActor = lockedActors.withLock { actors in
-            actors.removeValue(forKey: remoteID)?.actor
+        let deadActors = lockedActors.withLock { actors in
+            let keys = actors.keys.filter { $0.address == remoteID.address }
+            return keys.map { actors.removeValue(forKey: $0)?.actor }.compactMap { $0 }
         }
-        self.logger.trace("Removed \(remoteID) \(deadActor != nil)")
-        let dead = self.lockedMessagesInflight.withLock {
-            inFlight in
-            inFlight.removeValue(forKey: remoteID)
+        let deadActor = deadActors.first
+        self.logger.trace("Removed \(deadActors.count) actors for \(remoteID.address)")
+        let deadMessages = lockedMessagesInflight.withLock { inFlight in
+            let keys = inFlight.keys.filter { $0.address == remoteID.address }
+            return keys.flatMap { inFlight.removeValue(forKey: $0) ?? [] }
         }
-        if let dead {
+        _ = lockedOutbounds.withLock { $0.removeValue(forKey: remoteID.address) }
+        if !deadMessages.isEmpty {
             self.lockedAwaitingInbound.withLock { messages in
-                for d in dead {
+                for d in deadMessages {
                     let m = messages.removeValue(forKey: d)
                     m?.resume(
                         throwing: WebSocketSystemError.message(
@@ -469,30 +467,6 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         return CallEncoder(actorSystem: self, logLevel: logger.logLevel)
     }
 
-    private func _encodeAndSend<Act>(
-        on actor: Act,
-        message: WebSocketMessage
-    ) async throws -> SerializationRequirement
-    where Act: DistributedActor, WebSocketActorId == Act.ID {
-        let payload = try encoder.encode(message)
-
-        guard let json = String(data: payload, encoding: .utf8) else {
-            throw WebSocketSystemError.message("Could not find json")
-        }
-
-        let frame = WebSocketFrame(
-            fin: true, opcode: .text, data: ByteBuffer(string: json))
-
-        let value = try await withCheckedThrowingContinuation {
-            (continuation: CheckedContinuation<any SerializationRequirement, any Error>) in
-            let m = OutgoingMessage(id: message.messageID, frame: frame, continuation: continuation)
-            Task.immediate {
-                await messageQueue.enqueue(m, for: actor.id)
-            }
-        }
-        return value
-    }
-
     public func remoteCallVoid<Act, Err>(
         on actor: Act,
         target: RemoteCallTarget,
@@ -512,8 +486,24 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             returnTypeName: nil,
             throwingTypeName: errorName)
 
-        let value: any WebSocketSystem.SerializationRequirement = try await _encodeAndSend(
-            on: actor, message: msg)
+        let value: any WebSocketSystem.SerializationRequirement = try await withCheckedThrowingContinuation {
+            continuation in
+            lockedAwaitingInbound.withLock { $0[msg.messageID] = continuation }
+            _ = lockedMessagesInflight.withLock { $0[actor.id, default: []].insert(msg.messageID) }
+            Task {
+                do {
+                    let payload = try encoder.encode(msg)
+                    guard let json = String(data: payload, encoding: .utf8) else {
+                        throw WebSocketSystemError.message("Could not find json")
+                    }
+                    let frame = WebSocketFrame(fin: true, opcode: .text, data: ByteBuffer(string: json))
+                    let outbound = lockedOutbounds.withLock { $0[actor.id.address] }!
+                    try await outbound.write(frame)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
 
         guard let jsonRsp = value as? String else {
             throw WebSocketSystemError.message("Failed to view json string \(type(of: value))")
@@ -562,10 +552,25 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             returnTypeName: respName,
             throwingTypeName: errorName)
 
-        let value: any WebSocketSystem.SerializationRequirement = try await _encodeAndSend(
-            on: actor, message: msg)
+        let value: any WebSocketSystem.SerializationRequirement = try await withCheckedThrowingContinuation {
+            continuation in
+            lockedAwaitingInbound.withLock { $0[msg.messageID] = continuation }
+            _ = lockedMessagesInflight.withLock { $0[actor.id, default: []].insert(msg.messageID) }
+            Task {
+                do {
+                    let payload = try encoder.encode(msg)
+                    guard let json = String(data: payload, encoding: .utf8) else {
+                        throw WebSocketSystemError.message("Could not find json")
+                    }
+                    let frame = WebSocketFrame(fin: true, opcode: .text, data: ByteBuffer(string: json))
+                    let outbound = lockedOutbounds.withLock { $0[actor.id.address] }!
+                    try await outbound.write(frame)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
 
-        // We are never getting to here.
         guard let jsonRsp = value as? String else {
             throw WebSocketSystemError.message("Failed to view json string \(type(of: value))")
         }

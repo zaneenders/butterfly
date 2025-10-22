@@ -13,12 +13,6 @@ extension WebSocketSystem {
         case server(host: String, port: Int, uri: String)
     }
 
-    struct OutgoingMessage {
-        let id: UUID
-        let frame: WebSocketFrame
-        let continuation: MailboxPayload
-    }
-
     struct AwaitingInbound {
         let id: UUID
         let continuation: MailboxPayload
