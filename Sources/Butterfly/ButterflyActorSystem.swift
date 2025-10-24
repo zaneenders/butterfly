@@ -199,7 +199,7 @@ public final class ButterflyActorSystem: DistributedActorSystem, Sendable {
                 } catch let expected as ButterflyMessageError {
                     throw expected
                 } catch {
-                    throw ButterflyMessageError.idk("Invalid reponse")
+                    throw ButterflyMessageError.idk("Invalid response")
                 }
             }
         }
@@ -447,7 +447,7 @@ extension ButterflyActorSystem {
 
         public func onThrow<Err>(error: Err) async throws where Err: Error {
             logger.trace("\(#function)")
-            // TODO: Return the actual arror
+            // TODO: Return the actual error
             let re = RemoteErrorMessage(message: "\(error)")
             let data = try encoder.encode(re)
             let json = String(data: data, encoding: .utf8)!

@@ -18,7 +18,7 @@ private func startup(server: Int, laptop: Int) async throws -> (Butterfly, Butte
 @Suite
 struct ButterflyActorSystemInitTests {
 
-    @Test func connectTwoDaemons() async {
+    @Test(.timeLimit(.minutes(1))) func connectTwoDaemons() async {
         do {
             let (server, laptop) = try await startup(server: 48802, laptop: 48803)
 
@@ -49,7 +49,7 @@ private func getRemotes(server: Int, laptop: Int) async throws -> (TestScribe, T
 @Suite
 struct ButterflyActorSystemMessageTests {
 
-    @Test func argumentsNotThrowing() async {
+    @Test(.timeLimit(.minutes(1))) func argumentsNotThrowing() async {
         do {
             let (serverR, laptopR) = try await getRemotes(server: 48900, laptop: 48901)
             let l = try await laptopR.six()
@@ -64,7 +64,7 @@ struct ButterflyActorSystemMessageTests {
         }
     }
 
-    @Test func noArgumentsNotThrowing() async {
+    @Test(.timeLimit(.minutes(1))) func noArgumentsNotThrowing() async {
         do {
             let (serverR, laptopR) = try await getRemotes(server: 48902, laptop: 48903)
             await #expect(throws: Never.self) {
@@ -78,7 +78,7 @@ struct ButterflyActorSystemMessageTests {
         }
     }
 
-    @Test func sendOneHunderedMessages() async {
+    @Test(.timeLimit(.minutes(1))) func sendOneHunderedMessages() async {
         do {
             let (serverR, laptopR) = try await getRemotes(server: 48904, laptop: 48905)
             await withTaskGroup { group in
@@ -100,7 +100,7 @@ struct ButterflyActorSystemMessageTests {
         }
     }
 
-    @Test func checkErrorsAreThrow() async {
+    @Test(.timeLimit(.minutes(1))) func checkErrorsAreThrow() async {
         do {
             let (serverR, laptopR) = try await getRemotes(server: 48906, laptop: 48907)
             let expected = ButterflyMessageError.idk("idk(\"TEST ERROR\")")
