@@ -28,10 +28,10 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
   }
 
-  internal let lockedActors: Mutex<[Address: WeakRef]> = Mutex([:])
+  internal let lockedLocalActors: Mutex<[WebSocketActorId: WeakRef]> = Mutex([:])
   internal let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
   internal let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
-  internal let lockedOutbounds: Mutex<[Address: NIOAsyncChannelOutboundWriter<WebSocketFrame>]> = Mutex([:])
+  internal let lockedOutbounds: Mutex<[WebSocketActorId: NIOAsyncChannelOutboundWriter<WebSocketFrame>]> = Mutex([:])
   private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
 
   public let mode: Mode
@@ -110,7 +110,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         value?.resume(throwing: WebSocketSystemError.message("Shutting down"))
       }
     }
-    lockedActors.withLock { actors in
+    lockedLocalActors.withLock { actors in
       actors.removeAll()
     }
     lockedMessagesInflight.withLock { inFlight in
@@ -169,7 +169,11 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
               }
             }
           } catch {
-            self.logger.critical("Connection stream closed: \(error)")
+            if error is CancellationError {
+              self.logger.info("Connection stream closed: server shutting down")
+            } else {
+              self.logger.critical("Connection stream closed: \(error)")
+            }
           }
           self.logger.warning("Server shutting down")
         }
@@ -191,7 +195,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         try await wsChannel.executeThenClose {
           inbound,
           outbound in
-          lockedOutbounds.withLock { $0[remoteId.address] = outbound }
+          lockedOutbounds.withLock { $0[remoteId] = outbound }
           await withTaskGroup { group in
             group.addTask {
               do {
@@ -200,9 +204,13 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                   inbound: inbound,
                   outbound: outbound)
               } catch {
-                self.logger.error(
-                  "Message loop closed for \(remoteId): \(error)"
-                )
+                if error is CancellationError {
+                  self.logger.trace("Connection closed for \(remoteId)")
+                } else {
+                  self.logger.notice(
+                    "Message loop closed for \(remoteId): \(error)"
+                  )
+                }
               }
             }
             group.addTask {
@@ -212,7 +220,8 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                 try? await outbound.write(
                   WebSocketFrame(
                     fin: true, opcode: .connectionClose, data: ByteBuffer()))
-                self.logger.warning(
+                // TODO: Maybe don't fail quite as fast here.
+                self.logger.notice(
                   "failed to send ping to \(remoteId), closing down.")
                 return
               }
@@ -234,14 +243,18 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         inbound,
         outbound in
         let remoteID = try clientChannel!.channel.remoteAddress.getID(self.logger)
-        lockedOutbounds.withLock { $0[remoteID.address] = outbound }
+        lockedOutbounds.withLock { $0[remoteID] = outbound }
         await withTaskGroup { group in
           group.addTask {
             do {
               try await self._handleClientFrames(
                 remoteId: remoteID, inbound: inbound, outbound: outbound)
             } catch {
-              self.logger.error("Web socket message loop threw: \(error)")
+              if error is CancellationError {
+                self.logger.info("Web socket message loop cancelled")
+              } else {
+                self.logger.error("Web socket message loop threw: \(error)")
+              }
               try? await outbound.write(
                 WebSocketFrame(
                   fin: true, opcode: .connectionClose, data: ByteBuffer()))
@@ -367,13 +380,13 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
       return
     }
     self.logger.trace("\(networkMessage)")
-    let actor = self.lockedActors.withLock { actors in
-      return actors[networkMessage.actorID.address]?.actor
+    let actor = self.lockedLocalActors.withLock { actors in
+      return actors[networkMessage.actorID]?.actor
     }
     self.logger.trace("\(String(describing: actor))")
     guard let actor else {
       self.logger.error("Missing \(type(of: actor))")
-      self.lockedActors.withLock { actors in
+      self.lockedLocalActors.withLock { actors in
         self.logger.trace("actors: \(actors)")
       }
       return
@@ -427,17 +440,17 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
   private func cleanUp(for remoteID: WebSocketActorId) -> (any DistributedActor)? {
     self.logger.notice("Cleaning up for: \(remoteID) connection closed.")
-    let deadActors = lockedActors.withLock { actors in
-      let keys = actors.keys.filter { $0 == remoteID.address }
+    let deadActors = lockedLocalActors.withLock { actors in
+      let keys = actors.keys.filter { $0 == remoteID }
       return keys.map { actors.removeValue(forKey: $0)?.actor }.compactMap { $0 }
     }
     let deadActor = deadActors.first
-    self.logger.trace("Removed \(deadActors.count) actors for \(remoteID.address)")
+    self.logger.trace("Removed \(deadActors.count) actors for \(remoteID)")
     let deadMessages = lockedMessagesInflight.withLock { inFlight in
-      let keys = inFlight.keys.filter { $0.address == remoteID.address }
+      let keys = inFlight.keys.filter { $0 == remoteID }
       return keys.flatMap { inFlight.removeValue(forKey: $0) ?? [] }
     }
-    _ = lockedOutbounds.withLock { $0.removeValue(forKey: remoteID.address) }
+    _ = lockedOutbounds.withLock { $0.removeValue(forKey: remoteID) }
     if !deadMessages.isEmpty {
       self.lockedAwaitingInbound.withLock { messages in
         for d in deadMessages {
@@ -459,8 +472,8 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
   public func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
     logger.trace("\(#function) \(actor.id)")
-    lockedActors.withLock { actors in
-      actors[actor.id.address] = WeakRef(actor)
+    lockedLocalActors.withLock { actors in
+      actors[actor.id] = WeakRef(actor)
     }
   }
 
@@ -471,8 +484,8 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
   public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
   where Act: DistributedActor, ActorID == Act.ID {
-    let actor = lockedActors.withLock { actors in
-      actors[id.address]
+    let actor = lockedLocalActors.withLock { actors in
+      actors[id]
     }
     let r = actor as? Act
     // TODO: delete these last two lines of code.
@@ -515,7 +528,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             throw WebSocketSystemError.message("Could not find json")
           }
           let frame = WebSocketFrame(fin: true, opcode: .text, data: ByteBuffer(string: json))
-          let outbound = lockedOutbounds.withLock { $0[actor.id.address] }!
+          let outbound = lockedOutbounds.withLock { $0[actor.id] }!
           try await outbound.write(frame)
         } catch {
           continuation.resume(throwing: error)
@@ -581,7 +594,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             throw WebSocketSystemError.message("Could not find json")
           }
           let frame = WebSocketFrame(fin: true, opcode: .text, data: ByteBuffer(string: json))
-          let outbound = lockedOutbounds.withLock { $0[actor.id.address] }!
+          let outbound = lockedOutbounds.withLock { $0[actor.id] }!
           try await outbound.write(frame)
         } catch {
           continuation.resume(throwing: error)
