@@ -7,6 +7,28 @@ import WebSocketSystem
 struct PublicWebSocketTests {
   let logLevel: Logger.Level = .error
 
+  @Test(.timeLimit(.minutes(1))) func onlyServer() async throws {
+    let host = "::1"
+    let port = 7010
+    // Setup networking
+    let serverSystem = try await WebSocketSystem(
+      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+    )
+    serverSystem.background()
+
+    let clientSystem = try await WebSocketSystem(
+      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+    )
+    clientSystem.background()
+
+    // Create actor instances and assign them to an actorsystem.
+    let server = Backend(actorSystem: serverSystem, logLevel: logLevel)
+
+    let ref = try Backend.resolve(id: server.id, using: clientSystem)
+    let work = try await ref.doWork(7)
+    #expect(work == 7)
+  }
+
   @Test(.timeLimit(.minutes(1))) func setup() async throws {
     let host = "::1"
     let port = 7000
