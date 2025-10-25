@@ -10,7 +10,7 @@ struct WebSocketSystemTests {
 
   @Test(.timeLimit(.minutes(1))) func connectDisconnect() async throws {
     let host = "::1"
-    let port = 7002
+    let port = 7020
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel
     )
@@ -74,7 +74,7 @@ struct WebSocketSystemTests {
 
   @Test(.timeLimit(.minutes(1))) func manyClients() async throws {
     let host = "::1"
-    let port = 7002
+    let port = 7021
     let numClients = 200
 
     print("Starting server system...")

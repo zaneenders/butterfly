@@ -18,6 +18,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-nio.git", branch: "main"),
     .package(url: "https://github.com/apple/swift-log.git", branch: "main"),
     .package(url: "https://github.com/zaneenders/git-commit-hash-plugin.git", from: "0.0.2"),
+    .package(url: "https://github.com/apple/swift-profile-recorder.git", .upToNextMinor(from: "0.3.0")),
   ],
   targets: [
     .target(
@@ -28,6 +29,7 @@ let package = Package(
         .product(name: "NIOPosix", package: "swift-nio"),
         .product(name: "NIOHTTP1", package: "swift-nio"),
         .product(name: "NIOWebSocket", package: "swift-nio"),
+        .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
       ], swiftSettings: swiftSettings,
       plugins: [
         .plugin(name: "GitCommitHashPlugin", package: "git-commit-hash-plugin")
@@ -41,9 +43,29 @@ let package = Package(
         .product(name: "NIOPosix", package: "swift-nio"),
         .product(name: "NIOHTTP1", package: "swift-nio"),
         .product(name: "NIOWebSocket", package: "swift-nio"),
+        .product(name: "ProfileRecorderServer", package: "swift-profile-recorder"),
       ], swiftSettings: swiftSettings,
       plugins: [
         .plugin(name: "GitCommitHashPlugin", package: "git-commit-hash-plugin")
+      ]
+    ),
+    .target(
+      name: "TestWorker",
+      dependencies: [
+        "WebSocketSystem"
+      ]),
+    .executableTarget(
+      name: "ManyClientsServer",
+      dependencies: [
+        "WebSocketSystem",
+        "TestWorker",
+      ]
+    ),
+    .executableTarget(
+      name: "ManyClientsClient",
+      dependencies: [
+        "WebSocketSystem",
+        "TestWorker",
       ]
     ),
     .testTarget(
