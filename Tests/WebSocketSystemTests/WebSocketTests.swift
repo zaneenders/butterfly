@@ -9,7 +9,7 @@ struct WebSocketSystemTests {
   let logLevel: Logger.Level = .error
 
   @Test(.timeLimit(.minutes(1))) func connectDisconnect() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 7002
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel

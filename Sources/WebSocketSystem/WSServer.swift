@@ -3,6 +3,10 @@ import NIOHTTP1
 import NIOPosix
 import NIOWebSocket
 
+#if SSL
+import NIOSSL
+#endif
+
 enum ServerUpgradeResult {
   case websocket(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>)
   case notUpgraded(WebSocketSystemError)
@@ -11,7 +15,26 @@ enum ServerUpgradeResult {
 func boot(host: String, port: Int) async throws -> NIOAsyncChannel<
   EventLoopFuture<ServerUpgradeResult>, Never
 > {
-  // TODO: can i remove the EventLoopFuture for an NIOAsyncChannel
+  #if SSL
+  print("Server using SSL")
+  // TODO: load this from config file paths
+  let certPath = "cert.pem"
+  let keyPath = "key.pem"
+
+  let key = try NIOSSLPrivateKey(file: keyPath, format: .pem)
+
+  let tlsConfiguration = TLSConfiguration.makeServerConfiguration(
+    certificateChain: try NIOSSLCertificate.fromPEMFile(certPath)
+      .map {
+        .certificate($0)
+      },
+    privateKey: .privateKey(key)
+  )
+
+  let sslContext = try NIOSSLContext(configuration: tlsConfiguration)
+  #endif
+
+  // TODO: can I remove the EventLoopFuture for an NIOAsyncChannel
   let channel: NIOAsyncChannel<EventLoopFuture<ServerUpgradeResult>, Never> =
     try await ServerBootstrap(
       group: .singletonMultiThreadedEventLoopGroup
@@ -37,6 +60,11 @@ func boot(host: String, port: Int) async throws -> NIOAsyncChannel<
             }
           }
         )
+
+        #if SSL
+        try channel.pipeline.syncOperations.addHandler(
+          NIOSSLServerHandler(context: sslContext))
+        #endif
 
         let serverUpgradeConfiguration = NIOTypedHTTPServerUpgradeConfiguration(
           upgraders: [upgrader],

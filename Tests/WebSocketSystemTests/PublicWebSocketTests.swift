@@ -8,7 +8,7 @@ struct PublicWebSocketTests {
   let logLevel: Logger.Level = .error
 
   @Test(.timeLimit(.minutes(1))) func setup() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 7000
     // Setup networking
     let serverSystem = try await WebSocketSystem(
@@ -62,7 +62,7 @@ struct PublicWebSocketTests {
   }
 
   @Test(.timeLimit(.minutes(1))) func twoClients() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 7001
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel

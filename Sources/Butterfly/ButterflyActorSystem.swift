@@ -5,6 +5,10 @@ import NIOCore
 import NIOPosix
 import Synchronization
 
+#if SSL
+import NIOSSL
+#endif
+
 public typealias ButterflyMessage = Sendable & Codable
 
 public final class ButterflyActorSystem: DistributedActorSystem, Sendable {
@@ -55,6 +59,25 @@ public final class ButterflyActorSystem: DistributedActorSystem, Sendable {
       NIOAsyncChannel<ButterflyCommand, ButterflyCommand>, Never
     >
   {
+
+    #if SSL
+    logger.notice("Using SSL")
+    // TODO: load this from config file paths
+    let certPath = "cert.pem"
+    let keyPath = "key.pem"
+
+    let key = try NIOSSLPrivateKey(file: keyPath, format: .pem)
+
+    let tlsConfiguration = TLSConfiguration.makeServerConfiguration(
+      certificateChain: try NIOSSLCertificate.fromPEMFile(certPath)
+        .map {
+          .certificate($0)
+        },
+      privateKey: .privateKey(key)
+    )
+
+    let sslContext = try NIOSSLContext(configuration: tlsConfiguration)
+    #endif
     logger.trace(#function)
     let group: MultiThreadedEventLoopGroup = .singleton
     let bootstrap =
@@ -62,6 +85,10 @@ public final class ButterflyActorSystem: DistributedActorSystem, Sendable {
       .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
       .bind(host: host, port: port) { channel in
         channel.eventLoop.makeCompletedFuture {
+          #if SSL
+          try channel.pipeline.syncOperations.addHandler(
+            NIOSSLServerHandler(context: sslContext))
+          #endif
           try channel.pipeline.syncOperations.addHandler(
             ByteToMessageHandler(BufferCoder(logger: logger)))
           try channel.pipeline.syncOperations.addHandler(

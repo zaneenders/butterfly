@@ -9,3 +9,6 @@
 /.vscode
 # Logs
 /Logs
+# Certs 
+cert.pem
+key.pem
