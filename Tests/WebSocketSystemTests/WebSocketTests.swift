@@ -77,19 +77,21 @@ struct WebSocketSystemTests {
     let port = 7002
     let numClients = 200
 
+    print("Starting server system...")
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+      .server(host: host, port: port, uri: "/"), logLevel: .warning
     )
     serverSystem.background()
 
-    // Create actor instances and assign them to an actorsystem.
-    let server = Backend(actorSystem: serverSystem, logLevel: logLevel)
+    let server = Backend(actorSystem: serverSystem, logLevel: .warning)
 
+    print("Creating \(numClients) client systems...")
     var clientSystems: [WebSocketSystem] = []
     var serverConnections: [Backend] = []
     for i in 0..<numClients {
+      if i % 50 == 0 { print("Created \(i) clients...") }
       let clientSystem = try await WebSocketSystem(
-        .client(host: host, port: port, uri: "/"), logLevel: logLevel
+        .client(host: host, port: port, uri: "/"), logLevel: .warning
       )
       clientSystem.background()
       clientSystems.append(clientSystem)
@@ -99,11 +101,15 @@ struct WebSocketSystemTests {
       let response = try await serverConnection.doWork(i)
       #expect(response == i)
     }
+    print("All clients created and initial calls completed.")
     let connections = serverConnections
 
-    let messagesToSend = 40000
+    let messagesToSend = 100_000
+    print("Sending \(messagesToSend) messages across \(numClients) clients...")
     let count = await withTaskGroup(of: Int.self) { group in
+      let sendStart = ContinuousClock.now
       for c in 0..<messagesToSend {
+        if c % 10000 == 0 { print("Sent \(c) messages...") }
         let clientIndex = c % numClients
         group.addTask {
           let id = try? await connections[clientIndex].doWork(c)
@@ -113,24 +119,29 @@ struct WebSocketSystemTests {
           return 0
         }
       }
+      let sendStop = ContinuousClock.now
+      print("send time: \(sendStop - sendStart)")
       var total = 0
       for await result in group {
         total += result
       }
+      let end = ContinuousClock.now
+      // Roughly 1.7 seconds in release mode
+      print("recieve time: \(end - sendStop)")
       return total
     }
+    print("All messages sent. Successful: \(count)/\(messagesToSend)")
     #expect(count == messagesToSend)
 
     serverSystem.lockedOutbounds.withLock { actors in
       #expect(actors.count == numClients)
-      for actor in actors {
-        print(actor.key)
-      }
     }
 
+    print("Shutting down client systems...")
     for clientSystem in clientSystems {
       clientSystem.shutdown()
     }
+    print("Shutting down server system...")
     serverSystem.shutdown()
   }
 }

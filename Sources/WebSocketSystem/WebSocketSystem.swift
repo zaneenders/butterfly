@@ -169,7 +169,11 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
               }
             }
           } catch {
-            self.logger.critical("Connection stream closed: \(error)")
+            if error is CancellationError {
+              self.logger.info("Connection stream closed: server shutting down")
+            } else {
+              self.logger.critical("Connection stream closed: \(error)")
+            }
           }
           self.logger.warning("Server shutting down")
         }
@@ -200,9 +204,13 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                   inbound: inbound,
                   outbound: outbound)
               } catch {
-                self.logger.error(
-                  "Message loop closed for \(remoteId): \(error)"
-                )
+                if error is CancellationError {
+                  self.logger.trace("Connection closed for \(remoteId)")
+                } else {
+                  self.logger.notice(
+                    "Message loop closed for \(remoteId): \(error)"
+                  )
+                }
               }
             }
             group.addTask {
@@ -212,7 +220,8 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
                 try? await outbound.write(
                   WebSocketFrame(
                     fin: true, opcode: .connectionClose, data: ByteBuffer()))
-                self.logger.warning(
+                // TODO: Maybe don't fail quite as fast here.
+                self.logger.notice(
                   "failed to send ping to \(remoteId), closing down.")
                 return
               }
@@ -241,7 +250,11 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
               try await self._handleClientFrames(
                 remoteId: remoteID, inbound: inbound, outbound: outbound)
             } catch {
-              self.logger.error("Web socket message loop threw: \(error)")
+              if error is CancellationError {
+                self.logger.info("Web socket message loop cancelled")
+              } else {
+                self.logger.error("Web socket message loop threw: \(error)")
+              }
               try? await outbound.write(
                 WebSocketFrame(
                   fin: true, opcode: .connectionClose, data: ByteBuffer()))
