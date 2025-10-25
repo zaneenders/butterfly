@@ -1,3 +1,3 @@
 struct RemoteWSErrorMessage: Error, Equatable, Sendable, Codable {
-    let message: String
+  let message: String
 }

@@ -1,3 +1,3 @@
 enum WebSocketSystemError: Error {
-    case message(String)
+  case message(String)
 }
