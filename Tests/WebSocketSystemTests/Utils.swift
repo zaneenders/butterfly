@@ -35,6 +35,13 @@ distributed actor Ai {
       throw AiError.failedToResovle
     }
   }
+
+  distributed func talk(over id: ActorSystem.ActorID) async throws {
+    self.human = try Human.resolve(id: id, using: actorSystem.self)
+    if let human {
+      try await human.greet("Ai")
+    }
+  }
 }
 
 enum AiError: Error {
