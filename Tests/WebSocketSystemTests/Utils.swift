@@ -2,6 +2,52 @@ import Distributed
 import Logging
 import WebSocketSystem
 
+distributed actor Human {
+  typealias ActorSystem = WebSocketSystem
+  init(actorSystem: WebSocketSystem) {
+    self.actorSystem = actorSystem
+  }
+  var contactedLastBy: String?
+
+  distributed func greet(_ name: String) {
+    contactedLastBy = name
+  }
+}
+
+distributed actor Ai {
+  typealias ActorSystem = WebSocketSystem
+
+  var human: Human? = nil
+  init(actorSystem: WebSocketSystem) {
+    self.actorSystem = actorSystem
+  }
+
+  distributed func hello(_ id: WebSocketActorId) throws {
+    do {
+      self.human = try Human.resolve(id: id, using: actorSystem.self)
+      if let human {
+        Task {
+          try await human.greet("Ai")
+        }
+      }
+    } catch {
+      print(error)
+      throw AiError.failedToResovle
+    }
+  }
+
+  distributed func talk(over id: ActorSystem.ActorID) async throws {
+    self.human = try Human.resolve(id: id, using: actorSystem.self)
+    if let human {
+      try await human.greet("Ai")
+    }
+  }
+}
+
+enum AiError: Error {
+  case failedToResovle
+}
+
 distributed actor Backend {
   typealias ActorSystem = WebSocketSystem
   let logLevel: Logger.Level

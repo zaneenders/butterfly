@@ -7,6 +7,66 @@ import WebSocketSystem
 struct PublicWebSocketTests {
   let logLevel: Logger.Level = .error
 
+  @Test(.timeLimit(.minutes(1))) func talkOver() async throws {
+    let host = "::1"
+    let port = 8001
+    let serverSystem = try await WebSocketSystem(
+      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+    )
+    serverSystem.background()
+
+    let clientSystem = try await WebSocketSystem(
+      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+    )
+    clientSystem.background()
+
+    let _ai = Ai(actorSystem: serverSystem)
+    let _human = Human(actorSystem: clientSystem)
+
+    // Human connects to AI
+    let ai = try Ai.resolve(id: _ai.id, using: clientSystem)
+    // Says hello
+    try await ai.talk(over: _human.id)
+
+    #expect(true, "Did not deadlock")
+    await _human.whenLocal { h in
+      #expect(
+        h.contactedLastBy
+          == "Ai")
+    }
+  }
+
+  @Test func chatting() async throws {
+
+    let host = "::1"
+    let port = 8000
+    let serverSystem = try await WebSocketSystem(
+      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+    )
+    serverSystem.background()
+
+    let clientSystem = try await WebSocketSystem(
+      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+    )
+    clientSystem.background()
+
+    let _ai = Ai(actorSystem: serverSystem)
+    let _human = Human(actorSystem: clientSystem)
+
+    // Human connects to AI
+    let ai = try Ai.resolve(id: _ai.id, using: clientSystem)
+    // Says hello
+    try await ai.hello(_human.id)
+
+    try await Task.sleep(for: .milliseconds(10))
+    await _human.whenLocal { h in
+      // Assert response
+      #expect(
+        h.contactedLastBy
+          == "Ai")
+    }
+  }
+
   @Test(.timeLimit(.minutes(1))) func setup() async throws {
     let host = "localhost"
     let port = 7000
