@@ -387,14 +387,16 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
       outbound: outbound,
       encoder: self.encoder,
       logLevel: self.logger.logLevel)
-    try await self.executeDistributedTarget(
-      on: actor,
-      target: RemoteCallTarget(networkMessage.target),
-      invocationDecoder: &decoder,
-      handler: handler)
-    self.logger.trace(
-      "Message handled: \(networkMessage)"
-    )
+    Task {
+      try await self.executeDistributedTarget(
+        on: actor,
+        target: RemoteCallTarget(networkMessage.target),
+        invocationDecoder: &decoder,
+        handler: handler)
+      self.logger.trace(
+        "Message completed: \(networkMessage)"
+      )
+    }
   }
 
   private func _handleClientFrames(
