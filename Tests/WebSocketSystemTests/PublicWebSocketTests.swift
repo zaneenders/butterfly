@@ -8,7 +8,7 @@ struct PublicWebSocketTests {
   let logLevel: Logger.Level = .error
 
   @Test(.timeLimit(.minutes(1))) func talkOver() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 8001
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel
@@ -38,7 +38,7 @@ struct PublicWebSocketTests {
 
   @Test func chatting() async throws {
 
-    let host = "::1"
+    let host = "localhost"
     let port = 8000
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel
