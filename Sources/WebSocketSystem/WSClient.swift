@@ -24,16 +24,18 @@ func connect(host: String, port: Int, uri: String) async throws -> ClientUpgrade
   #if SSL
   print("Client using SSL")
   var tlsConfig = TLSConfiguration.makeClientConfiguration()
-  let config = try await ConfigReader(
+  if let config = try? await ConfigReader(
     provider: EnvironmentVariablesProvider(
       environmentFilePath: ".env",
     ))
-  if let certPath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)?
-    .description
   {
-    let caCerts = try NIOSSLCertificate.fromPEMFile(certPath)
-    tlsConfig.trustRoots = .certificates(caCerts)
-    tlsConfig.certificateVerification = .fullVerification
+    if let certPath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)?
+      .description
+    {
+      let caCerts = try NIOSSLCertificate.fromPEMFile(certPath)
+      tlsConfig.trustRoots = .certificates(caCerts)
+      tlsConfig.certificateVerification = .fullVerification
+    }
   }
   let sslContext = try NIOSSLContext(configuration: tlsConfig)
   #endif
