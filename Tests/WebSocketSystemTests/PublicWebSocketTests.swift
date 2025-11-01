@@ -28,7 +28,7 @@ struct PublicWebSocketTests {
     // Says hello
     try await ai.talk(over: _human.id)
 
-    #expect(true, "Did not deadlock")
+    #expect(Bool(true), "Did not deadlock")
     await _human.whenLocal { h in
       #expect(
         h.contactedLastBy

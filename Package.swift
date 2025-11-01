@@ -23,6 +23,7 @@ let package = Package(
     .package(url: "https://github.com/zaneenders/git-commit-hash-plugin.git", from: "0.0.2"),
     .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.21.0"),
     .package(url: "https://github.com/apple/swift-configuration", from: "0.2.0"),
+    .package(url: "https://github.com/apple/swift-async-dns-resolver.git", from: "0.4.0"),
   ],
   targets: [
     .target(
@@ -55,6 +56,7 @@ let package = Package(
         .product(
           name: "Configuration", package: "swift-configuration",
           condition: .when(traits: ["SSL"])),
+        .product(name: "AsyncDNSResolver", package: "swift-async-dns-resolver"),
       ], swiftSettings: swiftSettings,
       plugins: [
         .plugin(name: "GitCommitHashPlugin", package: "git-commit-hash-plugin")
