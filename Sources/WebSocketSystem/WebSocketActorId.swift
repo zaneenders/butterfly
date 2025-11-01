@@ -9,8 +9,7 @@ public struct WebSocketActorId: Sendable, Codable, Hashable {
 
   public init(host: String, port: Int) {
     self.uuid = UUID()
-    let normalizedHost = host == "localhost" ? "::1" : host
-    self.address = Address(host: normalizedHost, port: port)
+    self.address = Address(host: host, port: port)
   }
 }
 
