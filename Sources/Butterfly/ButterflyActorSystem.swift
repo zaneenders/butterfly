@@ -7,6 +7,8 @@ import Synchronization
 
 #if SSL
 import NIOSSL
+import Configuration
+import SystemPackage
 #endif
 
 public typealias ButterflyMessage = Sendable & Codable
@@ -62,9 +64,22 @@ public final class ButterflyActorSystem: DistributedActorSystem, Sendable {
 
     #if SSL
     logger.notice("Using SSL")
-    // TODO: load this from config file paths
-    let certPath = "cert.pem"
-    let keyPath = "key.pem"
+    let config = try await ConfigReader(
+      provider: EnvironmentVariablesProvider(
+        environmentFilePath: ".env",
+      ))
+    guard
+      let certPath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)?
+        .description
+    else {
+      throw ButterflyMessageError.noCerts
+    }
+    guard
+      let keyPath = config.string(forKey: "SSL_PRIVATE_KEY_PATH", as: FilePath.self)?
+        .description
+    else {
+      throw ButterflyMessageError.noCerts
+    }
 
     let key = try NIOSSLPrivateKey(file: keyPath, format: .pem)
 

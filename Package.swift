@@ -22,6 +22,7 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-log.git", branch: "main"),
     .package(url: "https://github.com/zaneenders/git-commit-hash-plugin.git", from: "0.0.2"),
     .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.21.0"),
+    .package(url: "https://github.com/apple/swift-configuration", from: "0.2.0"),
   ],
   targets: [
     .target(
@@ -32,6 +33,9 @@ let package = Package(
           name: "NIOSSL", package: "swift-nio-ssl",
           condition: .when(traits: ["SSL"])),
         .product(name: "Logging", package: "swift-log"),
+        .product(
+          name: "Configuration", package: "swift-configuration",
+          condition: .when(traits: ["SSL"])),
       ], swiftSettings: swiftSettings,
       plugins: [
         .plugin(name: "GitCommitHashPlugin", package: "git-commit-hash-plugin")
@@ -47,6 +51,9 @@ let package = Package(
         .product(name: "NIOWebSocket", package: "swift-nio"),
         .product(
           name: "NIOSSL", package: "swift-nio-ssl",
+          condition: .when(traits: ["SSL"])),
+        .product(
+          name: "Configuration", package: "swift-configuration",
           condition: .when(traits: ["SSL"])),
       ], swiftSettings: swiftSettings,
       plugins: [

@@ -5,6 +5,8 @@ import NIOWebSocket
 
 #if SSL
 import NIOSSL
+import Configuration
+import SystemPackage
 #endif
 
 enum ServerUpgradeResult {
@@ -17,9 +19,22 @@ func boot(host: String, port: Int) async throws -> NIOAsyncChannel<
 > {
   #if SSL
   print("Server using SSL")
-  // TODO: load this from config file paths
-  let certPath = "cert.pem"
-  let keyPath = "key.pem"
+  let config = try await ConfigReader(
+    provider: EnvironmentVariablesProvider(
+      environmentFilePath: ".env",
+    ))
+  guard
+    let certPath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)?
+      .description
+  else {
+    throw WSClientError.noCerts
+  }
+  guard
+    let keyPath = config.string(forKey: "SSL_PRIVATE_KEY_PATH", as: FilePath.self)?
+      .description
+  else {
+    throw WSClientError.noCerts
+  }
 
   let key = try NIOSSLPrivateKey(file: keyPath, format: .pem)
 

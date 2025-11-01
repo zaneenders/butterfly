@@ -3,4 +3,5 @@ enum ButterflyMessageError: Error, Equatable {
   case networking(String)
   case decoding(String)
   case returnNameManglingError
+  case noCerts
 }

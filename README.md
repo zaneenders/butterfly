@@ -54,3 +54,12 @@ openssl req -x509 -newkey rsa:4096 -sha256 -days 365 -nodes \
   -subj "/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,IP:::1"
 ```
+
+To configure SSL certificate paths, set the following environment variable:
+
+```
+SSL_CERT_CHAIN_PATH=cert.pem
+SSL_PRIVATE_KEY_PATH=key.pem
+```
+
+Butterfly uses [swift-configuration](https://github.com/apple/swift-configuration) to load the certs.

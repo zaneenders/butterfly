@@ -1,5 +1,5 @@
 {
-  "originHash" : "580ea96b1a6e86bf017c3ae77e75999dc556c9ca526031403c6013c9bb19bb21",
+  "originHash" : "03ac56110983d5eb462febcf821340533f3d78ccb43476758130e312421344de",
   "pins" : [
     {
       "identity" : "git-commit-hash-plugin",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "e7854228bcca130cd1ef7bb4ecb4bdc861db7a68",
         "version" : "0.0.2"
+      }
+    },
+    {
+      "identity" : "swift-async-algorithms",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-async-algorithms.git",
+      "state" : {
+        "revision" : "042e1c4d9d19748c9c228f8d4ebc97bb1e339b0b",
+        "version" : "1.0.4"
       }
     },
     {
@@ -29,6 +38,15 @@
       }
     },
     {
+      "identity" : "swift-configuration",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-configuration",
+      "state" : {
+        "revision" : "9d5e40727efd060fb9b41b69932738f478abaa43",
+        "version" : "0.2.0"
+      }
+    },
+    {
       "identity" : "swift-log",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-log.git",
@@ -44,6 +62,24 @@
       "state" : {
         "branch" : "main",
         "revision" : "dee7095f8d8a37a4cd165109768552163aa76458"
+      }
+    },
+    {
+      "identity" : "swift-nio-ssl",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-nio-ssl.git",
+      "state" : {
+        "revision" : "173cc69a058623525a58ae6710e2f5727c663793",
+        "version" : "2.36.0"
+      }
+    },
+    {
+      "identity" : "swift-service-lifecycle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swift-server/swift-service-lifecycle",
+      "state" : {
+        "revision" : "0fcc4c9c2d58dd98504c06f7308c86de775396ff",
+        "version" : "2.9.0"
       }
     },
     {

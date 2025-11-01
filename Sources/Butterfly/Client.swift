@@ -4,6 +4,8 @@ import NIOPosix
 
 #if SSL
 import NIOSSL
+import Configuration
+import SystemPackage
 #endif
 
 struct Client: Sendable {
@@ -58,9 +60,17 @@ struct Client: Sendable {
       #if SSL
       logger.notice("Using SSL")
       var tlsConfig = TLSConfiguration.makeClientConfiguration()
-      let caCerts = try NIOSSLCertificate.fromPEMFile("cert.pem")
-      tlsConfig.trustRoots = .certificates(caCerts)
-      tlsConfig.certificateVerification = .fullVerification
+      let config = try await ConfigReader(
+        provider: EnvironmentVariablesProvider(
+          environmentFilePath: ".env",
+        ))
+      if let certPath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)?
+        .description
+      {
+        let caCerts = try NIOSSLCertificate.fromPEMFile(certPath)
+        tlsConfig.trustRoots = .certificates(caCerts)
+        tlsConfig.certificateVerification = .fullVerification
+      }
       let sslContext = try NIOSSLContext(configuration: tlsConfig)
       #endif
       bootstrap = try await ClientBootstrap(group: group)
