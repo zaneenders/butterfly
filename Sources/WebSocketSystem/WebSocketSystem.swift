@@ -281,7 +281,10 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     inbound: NIOAsyncChannelInboundStream<WebSocketFrame>,
     outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
   ) async throws {
-    // TODO: Do we need to save a ref to client here?
+    let pingFrame = WebSocketFrame(
+      fin: true, opcode: .ping, data: ByteBuffer(string: ""))
+    try await outbound.write(pingFrame)
+    self.logger.trace("ping succeded saving connection")
     connection: for try await frame in inbound {
       switch frame.opcode {
       case .text:
@@ -411,6 +414,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     let pingFrame = WebSocketFrame(
       fin: true, opcode: .ping, data: ByteBuffer(string: ""))
     try await outbound.write(pingFrame)
+    self.logger.trace("ping succeded saving connection")
     // NOTE: Do we need to save ref to server here?
     connection: for try await frame in inbound {
       switch frame.opcode {
@@ -483,7 +487,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
     let r = actor as? Act
     // TODO: delete these last two lines of code.
-    logger.trace("\(#function): \(String(describing: r))")
+    logger.trace("\(#function): \(id) \(String(describing: r))")
     return r
   }
 
