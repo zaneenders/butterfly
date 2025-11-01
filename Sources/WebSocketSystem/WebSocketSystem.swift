@@ -47,10 +47,10 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
       self.serverChannel = try await boot(host: host, port: port, logger: setupLogger)
       self.clientChannel = nil
       self.mode = .server
-    case .client(let host, let port, let uri):
+    case .client(let host, let port, let domain, let uri):
       id = WebSocketActorId(host: host, port: port)
       self.serverChannel = nil
-      let r = try await connect(host: host, port: port, uri: uri)
+      let r = try await connect(host: host, port: port, domain: domain, uri: uri)
       switch r {
       case .notUpgraded:
         throw WSClientError.notUpgraded

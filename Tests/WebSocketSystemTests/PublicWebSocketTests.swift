@@ -16,7 +16,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -46,7 +46,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -77,7 +77,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -130,7 +130,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -144,7 +144,7 @@ struct PublicWebSocketTests {
     let id = try await serverConnection.doWork(69)
     #expect(id == 69)
     let clientSystem2 = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem2.background()
     let serverConnection2 = try Backend.resolve(id: server.id, using: clientSystem2)

@@ -19,7 +19,7 @@ enum WSClientError: Error {
   case noCerts
 }
 
-func connect(host: String, port: Int, uri: String) async throws -> ClientUpgradeResult {
+func connect(host: String, port: Int, domain: String, uri: String) async throws -> ClientUpgradeResult {
 
   #if SSL
   print("Client using SSL")
@@ -73,7 +73,7 @@ func connect(host: String, port: Int, uri: String) async throws -> ClientUpgrade
 
       #if SSL
       try channel.pipeline.syncOperations.addHandler(
-        try NIOSSLClientHandler(context: sslContext, serverHostname: host)
+        try NIOSSLClientHandler(context: sslContext, serverHostname: domain)
       )
       #endif
 
