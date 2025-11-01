@@ -1,3 +1,4 @@
+import Logging
 import NIOCore
 import NIOHTTP1
 import NIOPosix
@@ -14,7 +15,7 @@ enum ServerUpgradeResult {
   case notUpgraded(WebSocketSystemError)
 }
 
-func boot(host: String, port: Int) async throws -> NIOAsyncChannel<
+func boot(host: String, port: Int, logger: Logger) async throws -> NIOAsyncChannel<
   EventLoopFuture<ServerUpgradeResult>, Never
 > {
   #if SSL
@@ -36,6 +37,8 @@ func boot(host: String, port: Int) async throws -> NIOAsyncChannel<
     throw WSClientError.noCerts
   }
 
+  logger.trace("\(certPath) \(keyPath)")
+
   let key = try NIOSSLPrivateKey(file: keyPath, format: .pem)
 
   let tlsConfiguration = TLSConfiguration.makeServerConfiguration(
@@ -46,6 +49,7 @@ func boot(host: String, port: Int) async throws -> NIOAsyncChannel<
     privateKey: .privateKey(key)
   )
 
+  logger.trace("SSL setup")
   let sslContext = try NIOSSLContext(configuration: tlsConfiguration)
   #endif
 

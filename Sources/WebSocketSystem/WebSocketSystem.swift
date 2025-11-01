@@ -39,11 +39,12 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   public let port: Int
 
   public init(_ mode: Config, logLevel: Logger.Level) async throws {
+    let setupLogger = Logger.create(label: "WebSocketSystemSetup \(mode)", logLevel: logLevel)
     let id: WebSocketActorId
     switch mode {
     case .server(let host, let port, _):
       id = WebSocketActorId(host: host, port: port)
-      self.serverChannel = try await boot(host: host, port: port)
+      self.serverChannel = try await boot(host: host, port: port, logger: setupLogger)
       self.clientChannel = nil
       self.mode = .server
     case .client(let host, let port, let uri):
