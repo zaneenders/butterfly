@@ -1,5 +1,6 @@
 import Distributed
 import Logging
+import RegexBuilder
 import Testing
 
 @testable import WebSocketSystem
@@ -7,6 +8,12 @@ import Testing
 @Suite
 struct WebSocketSystemTests {
   let logLevel: Logger.Level = .error
+
+  @Test func resolve() async throws {
+    let domain = "google.com"
+    let ip = try await domain.resolveToIP()
+    #expect(ip.count > 0)  // TODO: not a great test.
+  }
 
   @Test(.timeLimit(.minutes(1))) func connectDisconnect() async throws {
     let host = "::1"
