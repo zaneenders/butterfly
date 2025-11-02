@@ -435,13 +435,13 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
 
   private func cleanUp(for remoteID: WebSocketActorId) -> (any DistributedActor)? {
     self.logger.notice("\(#function) for: \(remoteID) connection closed.")
-    let deadActors = lockedActors.withLock { actors in
+    let deadActor = lockedActors.withLock { actors in
       logger.trace("actors: \(actors)")
-      let keys = actors.keys.filter { $0 == remoteID.address }
-      return keys.map { actors.removeValue(forKey: $0)?.actor }.compactMap { $0 }
+      return actors.removeValue(forKey: remoteID.address)
     }
-    let deadActor = deadActors.first
-    self.logger.trace("Removed \(deadActors.count) actors for \(remoteID.address)")
+    if let deadActor {
+      self.logger.trace("Removed \(deadActor) actors for \(remoteID.address)")
+    }
     let deadMessages = lockedMessagesInflight.withLock { inFlight in
       let keys = inFlight.keys.filter { $0.address == remoteID.address }
       return keys.flatMap { inFlight.removeValue(forKey: $0) ?? [] }
@@ -457,7 +457,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         }
       }
     }
-    return deadActor
+    return deadActor?.actor
   }
 
   public func assignID<Act>(_ actorType: Act.Type) -> ActorID
