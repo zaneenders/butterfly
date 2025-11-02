@@ -1,5 +1,6 @@
 import Distributed
 import Logging
+import RegexBuilder
 import Testing
 
 @testable import WebSocketSystem
@@ -8,8 +9,14 @@ import Testing
 struct WebSocketSystemTests {
   let logLevel: Logger.Level = .error
 
+  @Test func resolve() async throws {
+    let domain = "google.com"
+    let ip = try await domain.resolveToIP()
+    #expect(ip.count > 0)  // TODO: not a great test.
+  }
+
   @Test(.timeLimit(.minutes(1))) func connectDisconnect() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 7002
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel
@@ -19,7 +26,7 @@ struct WebSocketSystemTests {
     let server = Backend(actorSystem: serverSystem, logLevel: logLevel)
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
     let serverConnection = try Backend.resolve(id: server.id, using: clientSystem)
@@ -39,7 +46,7 @@ struct WebSocketSystemTests {
     }
 
     let clientSystem2 = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem2.background()
     let serverConnection2 = try Backend.resolve(id: server.id, using: clientSystem2)

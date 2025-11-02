@@ -8,7 +8,7 @@ struct PublicWebSocketTests {
   let logLevel: Logger.Level = .error
 
   @Test(.timeLimit(.minutes(1))) func talkOver() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 8001
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel
@@ -16,7 +16,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -28,7 +28,7 @@ struct PublicWebSocketTests {
     // Says hello
     try await ai.talk(over: _human.id)
 
-    #expect(true, "Did not deadlock")
+    #expect(Bool(true), "Did not deadlock")
     await _human.whenLocal { h in
       #expect(
         h.contactedLastBy
@@ -38,7 +38,7 @@ struct PublicWebSocketTests {
 
   @Test func chatting() async throws {
 
-    let host = "::1"
+    let host = "localhost"
     let port = 8000
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel
@@ -46,7 +46,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -68,7 +68,7 @@ struct PublicWebSocketTests {
   }
 
   @Test(.timeLimit(.minutes(1))) func setup() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 7000
     // Setup networking
     let serverSystem = try await WebSocketSystem(
@@ -77,7 +77,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -122,7 +122,7 @@ struct PublicWebSocketTests {
   }
 
   @Test(.timeLimit(.minutes(1))) func twoClients() async throws {
-    let host = "::1"
+    let host = "localhost"
     let port = 7001
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, uri: "/"), logLevel: logLevel
@@ -130,7 +130,7 @@ struct PublicWebSocketTests {
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -144,7 +144,7 @@ struct PublicWebSocketTests {
     let id = try await serverConnection.doWork(69)
     #expect(id == 69)
     let clientSystem2 = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
     )
     clientSystem2.background()
     let serverConnection2 = try Backend.resolve(id: server.id, using: clientSystem2)
