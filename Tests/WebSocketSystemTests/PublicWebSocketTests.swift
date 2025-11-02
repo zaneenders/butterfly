@@ -11,7 +11,7 @@ struct PublicWebSocketTests {
     let host = "localhost"
     let port = 8001
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
     )
     serverSystem.background()
 
@@ -41,7 +41,7 @@ struct PublicWebSocketTests {
     let host = "localhost"
     let port = 8000
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
     )
     serverSystem.background()
 
@@ -72,7 +72,7 @@ struct PublicWebSocketTests {
     let port = 7000
     // Setup networking
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
     )
     serverSystem.background()
 
@@ -125,7 +125,7 @@ struct PublicWebSocketTests {
     let host = "localhost"
     let port = 7001
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
     )
     serverSystem.background()
 

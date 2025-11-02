@@ -19,7 +19,7 @@ struct WebSocketSystemTests {
     let host = "localhost"
     let port = 7002
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
     )
     serverSystem.background()
     // This isn't needed i don't think.
