@@ -42,7 +42,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     let setupLogger = Logger.create(label: "WebSocketSystemSetup \(mode)", logLevel: logLevel)
     let id: WebSocketActorId
     switch mode {
-    case .server(let host, let port, _):
+    case .server(let host, let port, _, _):
       id = WebSocketActorId(host: host, port: port)
       self.serverChannel = try await boot(host: host, port: port, logger: setupLogger)
       self.clientChannel = nil
@@ -63,27 +63,23 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     self.encoder = JSONEncoder()
     self.decoder = JSONDecoder()
 
-    let channel: any Channel
     switch mode {
-    case .server:
-      guard let c = serverChannel?.channel else {
-        throw WebSocketSystemError.message("Server has no channel")
-      }
-      channel = c
+    case .server(_, let port, let ip, _):
+      self.host = ip
+      self.port = port
     case .client:
-      guard let c = clientChannel?.channel else {
+      guard let channel = clientChannel?.channel else {
         throw WebSocketSystemError.message("Client has no channel")
       }
-      channel = c
+      guard let h: String = channel.localAddress?.ipAddress else {
+        throw WebSocketSystemError.message("\(mode)")
+      }
+      guard let p: Int = channel.localAddress?.port else {
+        throw WebSocketSystemError.message("\(mode)")
+      }
+      self.host = h
+      self.port = p
     }
-    guard let h: String = channel.localAddress?.ipAddress else {
-      throw WebSocketSystemError.message("\(mode)")
-    }
-    guard let p: Int = channel.localAddress?.port else {
-      throw WebSocketSystemError.message("\(mode)")
-    }
-    self.host = h
-    self.port = p
     self.decoder.userInfo[.actorSystemKey] = self
     self.encoder.userInfo[.actorSystemKey] = self
   }
