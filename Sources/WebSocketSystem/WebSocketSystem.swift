@@ -216,9 +216,10 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             }
             await group.next()
             group.cancelAll()
+            self.logger.trace("\(#function) closing down \(remoteId)")
+            _ = self.cleanUp(for: remoteId)
           }
         }
-        _ = self.cleanUp(for: remoteId)
       } catch {
         self.logger.error("Error with Websocket connection: \(error)")
       }
@@ -247,8 +248,9 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
           }
           await group.next()
           group.cancelAll()
+          self.logger.trace("\(#function) closing done")
+          _ = self.cleanUp(for: remoteID)
         }
-        _ = self.cleanUp(for: remoteID)
       }
     } catch {
       self.logger.critical("_runAsClient threw: \(error)")
@@ -280,7 +282,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     let pingFrame = WebSocketFrame(
       fin: true, opcode: .ping, data: ByteBuffer(string: ""))
     try await outbound.write(pingFrame)
-    self.logger.trace("ping succeded saving connection")
+    self.logger.trace("ping succeded \(remoteId)")
     connection: for try await frame in inbound {
       switch frame.opcode {
       case .text:
@@ -369,11 +371,11 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
       self.logger.error("Unable to decode: \(json)")
       return
     }
-    self.logger.trace("\(networkMessage)")
+    self.logger.trace("\(#function) \(networkMessage)")
     let actor = self.lockedActors.withLock { actors in
       return actors[networkMessage.actorID.address]?.actor
     }
-    self.logger.trace("\(String(describing: actor))")
+    self.logger.trace("\(#function) \(String(describing: actor))")
     guard let actor else {
       self.logger.error("Missing \(type(of: actor))")
       self.lockedActors.withLock { actors in
@@ -410,8 +412,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     let pingFrame = WebSocketFrame(
       fin: true, opcode: .ping, data: ByteBuffer(string: ""))
     try await outbound.write(pingFrame)
-    self.logger.trace("ping succeded saving connection")
-    // NOTE: Do we need to save ref to server here?
+    self.logger.trace("ping succeded \(remoteId)")
     connection: for try await frame in inbound {
       switch frame.opcode {
       case .pong, .ping:
