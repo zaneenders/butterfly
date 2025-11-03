@@ -16,7 +16,7 @@ struct WebSocketSystemTests {
   }
 
   @Test(.timeLimit(.minutes(1))) func connectDisconnect() async throws {
-    let host = "localhost"
+    let host = "127.0.0.1"
     let port = 7002
     let serverSystem = try await WebSocketSystem(
       .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
