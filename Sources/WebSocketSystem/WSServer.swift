@@ -24,12 +24,10 @@ public struct ServerConfig {
 
 public struct ServerSSLConfig {
   let ip: String
-  let certPath: FilePath
-  let keyPath: FilePath
-  public init(ip: String, certPath: FilePath, keyPath: FilePath) {
+  let tlsConfiguration: TLSConfiguration
+  public init(ip: String, tlsConfiguration: TLSConfiguration) {
     self.ip = ip
-    self.certPath = certPath
-    self.keyPath = keyPath
+    self.tlsConfiguration = tlsConfiguration
   }
 }
 
@@ -38,19 +36,10 @@ func boot(config: ServerConfig, logger: Logger) async throws -> NIOAsyncChannel<
 > {
 
   let sslContext: NIOSSLContext?
-  if let sslConfig = config.sslConfig {
-    let key = try NIOSSLPrivateKey(file: sslConfig.keyPath.string, format: .pem)
 
-    let tlsConfiguration = TLSConfiguration.makeServerConfiguration(
-      certificateChain: try NIOSSLCertificate.fromPEMFile(sslConfig.certPath.string)
-        .map {
-          .certificate($0)
-        },
-      privateKey: .privateKey(key)
-    )
-
+  if let tls = config.sslConfig?.tlsConfiguration {
+    sslContext = try NIOSSLContext(configuration: tls)
     logger.trace("SSL setup")
-    sslContext = try NIOSSLContext(configuration: tlsConfiguration)
   } else {
     sslContext = nil
   }
