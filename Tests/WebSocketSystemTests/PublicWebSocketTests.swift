@@ -8,15 +8,16 @@ struct PublicWebSocketTests {
   let logLevel: Logger.Level = .error
 
   @Test(.timeLimit(.minutes(1))) func talkOver() async throws {
+
     let host = "127.0.0.1"
     let port = 8001
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
+      .server(makeServerConfig(host: host, port: port)), logLevel: logLevel
     )
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
+      .client(makeClientConfig(host: host, port: port)), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -40,13 +41,14 @@ struct PublicWebSocketTests {
 
     let host = "127.0.0.1"
     let port = 8000
+
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
+      .server(makeServerConfig(host: host, port: port)), logLevel: logLevel
     )
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
+      .client(makeClientConfig(host: host, port: port)), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -70,14 +72,14 @@ struct PublicWebSocketTests {
   @Test(.timeLimit(.minutes(1))) func setup() async throws {
     let host = "127.0.0.1"
     let port = 7000
-    // Setup networking
+
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
+      .server(makeServerConfig(host: host, port: port)), logLevel: logLevel
     )
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
+      .client(makeClientConfig(host: host, port: port)), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -122,15 +124,17 @@ struct PublicWebSocketTests {
   }
 
   @Test(.timeLimit(.minutes(1))) func twoClients() async throws {
+    #if SSL
+    #endif
     let host = "127.0.0.1"
     let port = 7001
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, ip: host, uri: "/"), logLevel: logLevel
+      .server(makeServerConfig(host: host, port: port)), logLevel: logLevel
     )
     serverSystem.background()
 
     let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
+      .client(makeClientConfig(host: host, port: port)), logLevel: logLevel
     )
     clientSystem.background()
 
@@ -143,8 +147,9 @@ struct PublicWebSocketTests {
     // Various remote calls that are server through the WebSocket connection.
     let id = try await serverConnection.doWork(69)
     #expect(id == 69)
+
     let clientSystem2 = try await WebSocketSystem(
-      .client(host: host, port: port, domain: "localhost", uri: "/"), logLevel: logLevel
+      .client(makeClientConfig(host: host, port: port)), logLevel: logLevel
     )
     clientSystem2.background()
     let serverConnection2 = try Backend.resolve(id: server.id, using: clientSystem2)

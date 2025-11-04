@@ -42,15 +42,15 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     let setupLogger = Logger.create(label: "WebSocketSystemSetup \(mode)", logLevel: logLevel)
     let id: WebSocketActorId
     switch mode {
-    case .server(let host, let port, _, _):
-      id = WebSocketActorId(host: host, port: port)
-      self.serverChannel = try await boot(host: host, port: port, logger: setupLogger)
+    case .server(let config):
+      id = WebSocketActorId(host: config.host, port: config.port)
+      self.serverChannel = try await boot(config: config, logger: setupLogger)
       self.clientChannel = nil
       self.mode = .server
-    case .client(let host, let port, let domain, let uri):
-      id = WebSocketActorId(host: host, port: port)
+    case .client(let config):
+      id = WebSocketActorId(host: config.host, port: config.port)
       self.serverChannel = nil
-      let r = try await connect(host: host, port: port, domain: domain, uri: uri)
+      let r = try await connect(config: config)
       switch r {
       case .notUpgraded:
         throw WSClientError.notUpgraded
@@ -64,9 +64,9 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     self.decoder = JSONDecoder()
 
     switch mode {
-    case .server(_, let port, let ip, _):
-      self.host = ip
-      self.port = port
+    case .server(let config):
+      self.host = config.sslConfig?.ip ?? config.host
+      self.port = config.port
     case .client:
       guard let channel = clientChannel?.channel else {
         throw WebSocketSystemError.message("Client has no channel")

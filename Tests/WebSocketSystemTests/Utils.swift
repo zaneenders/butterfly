@@ -1,6 +1,36 @@
 import Distributed
 import Logging
+import SystemPackage
 import WebSocketSystem
+
+#if SSL
+import Configuration
+#endif
+
+func makeServerConfig(host: String, port: Int) async throws -> ServerConfig {
+  #if SSL
+  let config = try await ConfigReader(provider: EnvironmentVariablesProvider(environmentFilePath: ".env"))
+  let keyPath: FilePath = config.string(forKey: "SSL_PRIVATE_KEY_PATH", as: FilePath.self)!
+  let certPath: FilePath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)!
+  let serverConfig = ServerConfig(
+    host: host, port: port, sslConfig: ServerSSLConfig(ip: host, certPath: certPath, keyPath: keyPath))
+  #else
+  let serverConfig = ServerConfig(host: host, port: port)
+  #endif
+  return serverConfig
+}
+
+func makeClientConfig(host: String, port: Int) async throws -> ClientConfig {
+  #if SSL
+  let config = try await ConfigReader(provider: EnvironmentVariablesProvider(environmentFilePath: ".env"))
+  let certPath: FilePath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)!
+  let clientConfig = ClientConfig(
+    host: host, port: port, sslConfig: ClientSSLConfig(domain: "localhost", certChainPath: certPath))
+  #else
+  let clientConfig = ClientConfig(host: host, port: port)
+  #endif
+  return clientConfig
+}
 
 distributed actor Human {
   typealias ActorSystem = WebSocketSystem
