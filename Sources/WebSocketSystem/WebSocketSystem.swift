@@ -601,7 +601,13 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             throw WebSocketSystemError.message("Could not find json")
           }
           let frame = WebSocketFrame(fin: true, opcode: .text, data: ByteBuffer(string: json))
-          let outbound = lockedOutbounds.withLock { $0[id.address] }
+          let outbound = lockedOutbounds.withLock {
+            let channel = $0[id.address]
+            if channel == nil {
+              self.logger.warning("\($0)")
+            }
+            return channel
+          }
           guard let outbound else {
             throw WebSocketSystemError.actorNotFound(id.address)
           }
