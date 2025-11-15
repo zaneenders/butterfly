@@ -9,8 +9,8 @@ extension WebSocketSystem {
   }
 
   public enum Config {
-    case client(host: String, port: Int, domain: String, uri: String)
-    case server(host: String, port: Int, ip: String, uri: String)
+    case client(ClientConfig)
+    case server(ServerConfig)
   }
 
   struct AwaitingInbound {

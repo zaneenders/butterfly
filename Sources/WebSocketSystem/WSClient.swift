@@ -1,13 +1,9 @@
 import NIOCore
 import NIOHTTP1
 import NIOPosix
-import NIOWebSocket
-
-#if SSL
 import NIOSSL
-import Configuration
+import NIOWebSocket
 import SystemPackage
-#endif
 
 enum ClientUpgradeResult {
   case websocket(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>)
@@ -19,34 +15,59 @@ enum WSClientError: Error {
   case noCerts
 }
 
-func connect(host: String, port: Int, domain: String, uri: String) async throws -> ClientUpgradeResult {
+public struct ClientConfig {
+  let host: String
+  let port: Int
+  let uri: String
+  let sslConfig: ClientSSLConfig?
 
-  #if SSL
-  print("Client using SSL")
-  var tlsConfig = TLSConfiguration.makeClientConfiguration()
-  if let config = try? await ConfigReader(
-    provider: EnvironmentVariablesProvider(
-      environmentFilePath: ".env",
-    ))
-  {
-    if let certPath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)?
-      .description
-    {
-      let caCerts = try NIOSSLCertificate.fromPEMFile(certPath)
+  public init(host: String, port: Int, uri: String = "/", sslConfig: ClientSSLConfig? = nil) {
+    self.host = host
+    self.port = port
+    self.uri = uri
+    self.sslConfig = sslConfig
+  }
+}
+
+public struct ClientSSLConfig {
+  let domain: String
+  let certChainPath: FilePath?
+
+  public init(domain: String, certChainPath: FilePath?) {
+    self.domain = domain
+    self.certChainPath = certChainPath
+  }
+}
+
+func connect(config: ClientConfig) async throws
+  -> ClientUpgradeResult
+{
+  let sslContext: NIOSSLContext?
+  let domain: String?
+
+  if let sslConfig = config.sslConfig {
+    domain = sslConfig.domain
+    var tlsConfig = TLSConfiguration.makeClientConfiguration()
+    if let certChainPath = sslConfig.certChainPath {
+      let caCerts = try NIOSSLCertificate.fromPEMFile(certChainPath.string)
       tlsConfig.trustRoots = .certificates(caCerts)
       tlsConfig.certificateVerification = .fullVerification
     }
+    sslContext = try NIOSSLContext(configuration: tlsConfig)
+  } else {
+    domain = nil
+    sslContext = nil
   }
-  let sslContext = try NIOSSLContext(configuration: tlsConfig)
-  #endif
+
+  let uri = config.uri
 
   let upgradeResult: EventLoopFuture<ClientUpgradeResult> = try await ClientBootstrap(
     group: .singletonMultiThreadedEventLoopGroup
   )
   .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
   .connect(
-    host: host,
-    port: port
+    host: config.host,
+    port: config.port
   ) { channel in
     channel.eventLoop.makeCompletedFuture {
       let upgrader = NIOTypedWebSocketClientUpgrader<ClientUpgradeResult>(
@@ -71,11 +92,11 @@ func connect(host: String, port: Int, domain: String, uri: String) async throws 
         headers: headers
       )
 
-      #if SSL
-      try channel.pipeline.syncOperations.addHandler(
-        try NIOSSLClientHandler(context: sslContext, serverHostname: domain)
-      )
-      #endif
+      if let sslContext, let domain {
+        try channel.pipeline.syncOperations.addHandler(
+          try NIOSSLClientHandler(context: sslContext, serverHostname: domain)
+        )
+      }
 
       let clientUpgradeConfiguration = NIOTypedHTTPClientUpgradeConfiguration(
         upgradeRequestHead: requestHead,
