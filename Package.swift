@@ -15,7 +15,7 @@ let package = Package(
     )
   ],
   traits: [
-    .trait(name: "SSL", description: "Enable SSL")
+    .trait(name: "SSL", description: "Enable SSL")  // TODO: remove this when we merge Butterfly and WebSocketSystem
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-nio.git", branch: "main"),
