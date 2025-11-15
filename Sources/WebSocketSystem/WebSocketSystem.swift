@@ -43,12 +43,12 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     let id: WebSocketActorId
     switch mode {
     case .server(let config):
-      id = WebSocketActorId(host: config.host, port: config.port)
+      id = WebSocketActorId(host: config.host, port: config.port, name: "Server")
       self.serverChannel = try await boot(config: config, logger: setupLogger)
       self.clientChannel = nil
       self.mode = .server
     case .client(let config):
-      id = WebSocketActorId(host: config.host, port: config.port)
+      id = WebSocketActorId(host: config.host, port: config.port, name: "Client")
       self.serverChannel = nil
       let r = try await connect(config: config)
       switch r {
@@ -463,7 +463,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   public func assignID<Act>(_ actorType: Act.Type) -> ActorID
   where Act: DistributedActor, ActorID == Act.ID {
     logger.trace("\(#function) \(host) \(port)")
-    return WebSocketActorId(host: host, port: port)  // TODO: UUID or something for the actor?
+    return WebSocketActorId(host: host, port: port, name: "\(actorType)")
   }
 
   public func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
