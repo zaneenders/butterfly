@@ -28,11 +28,11 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
   }
 
-  internal let lockedActors: Mutex<[Address: WeakRef]> = Mutex([:])
+  private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
+  internal let lockedActors: Mutex<[WebSocketActorId: WeakRef]> = Mutex([:])
+  internal let lockedOutboundChannels: Mutex<[Address: NIOAsyncChannelOutboundWriter<WebSocketFrame>]> = Mutex([:])
   internal let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
   internal let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
-  internal let lockedOutbounds: Mutex<[Address: NIOAsyncChannelOutboundWriter<WebSocketFrame>]> = Mutex([:])
-  private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
 
   public let mode: Mode
   public let host: String
@@ -89,7 +89,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   }
 
   public func shutdown() {
-    lockedOutbounds.withLock { outbounds in
+    lockedOutboundChannels.withLock { outbounds in
       let frame = WebSocketFrame(fin: true, opcode: .connectionClose, data: ByteBuffer())
       for outbound in outbounds.values {
         Task.immediate {
@@ -188,7 +188,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         try await wsChannel.executeThenClose {
           inbound,
           outbound in
-          lockedOutbounds.withLock { $0[remoteId.address] = outbound }
+          lockedOutboundChannels.withLock { $0[remoteId.entity.address] = outbound }
           await withTaskGroup { group in
             group.addTask {
               do {
@@ -232,7 +232,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         inbound,
         outbound in
         let remoteID = try clientChannel!.channel.remoteAddress.getID(self.logger)
-        lockedOutbounds.withLock { $0[remoteID.address] = outbound }
+        lockedOutboundChannels.withLock { $0[remoteID.entity.address] = outbound }
         await withTaskGroup { group in
           group.addTask {
             do {
@@ -373,7 +373,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
     self.logger.trace("\(#function) \(networkMessage)")
     let actor = self.lockedActors.withLock { actors in
-      return actors[networkMessage.actorID.address]?.actor
+      return actors[networkMessage.actorID]?.actor
     }
     self.logger.trace("\(#function) \(String(describing: actor))")
     guard let actor else {
@@ -437,16 +437,16 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     self.logger.notice("\(#function) for: \(remoteID) connection closed.")
     let deadActor = lockedActors.withLock { actors in
       logger.trace("actors: \(actors)")
-      return actors.removeValue(forKey: remoteID.address)
+      return actors.removeValue(forKey: remoteID)
     }
     if let deadActor {
-      self.logger.trace("Removed \(deadActor) actors for \(remoteID.address)")
+      self.logger.trace("Removed \(deadActor) actors for \(remoteID.entity)")
     }
     let deadMessages = lockedMessagesInflight.withLock { inFlight in
-      let keys = inFlight.keys.filter { $0.address == remoteID.address }
+      let keys = inFlight.keys.filter { $0.entity == remoteID.entity }
       return keys.flatMap { inFlight.removeValue(forKey: $0) ?? [] }
     }
-    _ = lockedOutbounds.withLock { $0.removeValue(forKey: remoteID.address) }
+    _ = lockedOutboundChannels.withLock { $0.removeValue(forKey: remoteID.entity.address) }
     if !deadMessages.isEmpty {
       self.lockedAwaitingInbound.withLock { messages in
         for d in deadMessages {
@@ -469,7 +469,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   public func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
     logger.trace("\(#function) \(actor.id)")
     lockedActors.withLock { actors in
-      actors[actor.id.address] = WeakRef(actor)
+      actors[actor.id] = WeakRef(actor)
     }
   }
 
@@ -481,7 +481,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
   where Act: DistributedActor, ActorID == Act.ID {
     let actor = lockedActors.withLock { actors in
-      actors[id.address]
+      actors[id]
     }
     let r = actor as? Act
     // TODO: delete these last two lines of code.
@@ -601,15 +601,15 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
             throw WebSocketSystemError.message("Could not find json")
           }
           let frame = WebSocketFrame(fin: true, opcode: .text, data: ByteBuffer(string: json))
-          let outbound = lockedOutbounds.withLock {
-            let channel = $0[id.address]
+          let outbound = lockedOutboundChannels.withLock {
+            let channel = $0[id.entity.address]
             if channel == nil {
               self.logger.warning("\($0)")
             }
             return channel
           }
           guard let outbound else {
-            throw WebSocketSystemError.actorNotFound(id.address)
+            throw WebSocketSystemError.actorNotFound(id.entity)
           }
           try await outbound.write(frame)
         } catch {
