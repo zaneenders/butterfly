@@ -29,7 +29,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   }
 
   private let backgroundTask: Mutex<Task<(), Never>?> = Mutex(nil)
-  internal let lockedActors: Mutex<[WebSocketActorId: WeakRef]> = Mutex([:])
+  internal let lockedActors: Mutex<[EntityAddress: WeakRef]> = Mutex([:])
   internal let lockedOutboundChannels: Mutex<[Address: NIOAsyncChannelOutboundWriter<WebSocketFrame>]> = Mutex([:])
   internal let lockedMessagesInflight: Mutex<[WebSocketActorId: Set<UUID>]> = Mutex([:])
   internal let lockedAwaitingInbound: Mutex<[UUID: MailboxPayload]> = Mutex([:])
@@ -373,11 +373,12 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
     self.logger.trace("\(#function) \(networkMessage)")
     let actor = self.lockedActors.withLock { actors in
-      return actors[networkMessage.actorID]?.actor
+      return actors[networkMessage.actorID.entity]?.actor
     }
     self.logger.trace("\(#function) \(String(describing: actor))")
     guard let actor else {
       self.logger.error("Missing \(networkMessage.actorID)")
+      // TODO: explore remote init here.
       self.lockedActors.withLock { actors in
         self.logger.trace("actors: \(actors)")
       }
@@ -437,7 +438,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     self.logger.notice("\(#function) for: \(remoteID) connection closed.")
     let deadActor = lockedActors.withLock { actors in
       logger.trace("actors: \(actors)")
-      return actors.removeValue(forKey: remoteID)
+      return actors.removeValue(forKey: remoteID.entity)
     }
     if let deadActor {
       self.logger.trace("Removed \(deadActor) actors for \(remoteID.entity)")
@@ -469,7 +470,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   public func actorReady<Act>(_ actor: Act) where Act: DistributedActor, ActorID == Act.ID {
     logger.trace("\(#function) \(actor.id)")
     lockedActors.withLock { actors in
-      actors[actor.id] = WeakRef(actor)
+      actors[actor.id.entity] = WeakRef(actor)
     }
   }
 
@@ -481,7 +482,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
   public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
   where Act: DistributedActor, ActorID == Act.ID {
     let actor = lockedActors.withLock { actors in
-      actors[id]
+      actors[id.entity]
     }
     let r = actor as? Act
     // TODO: delete these last two lines of code.
