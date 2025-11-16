@@ -267,8 +267,8 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
         fin: true, opcode: .ping,
         data: buffer)
 
-      // self.logger.trace(
-      // "Sending time: \(theTime)")
+      self.logger.trace(
+        "Sending time: \(theTime)")
       try await outbound.write(frame)
       try await Task.sleep(for: .seconds(1))
     }
@@ -319,7 +319,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     outbound: NIOAsyncChannelOutboundWriter<WebSocketFrame>
   ) async throws {
     assert(frame.opcode == .ping)
-    // self.logger.trace("Received ping sending pong")
+    self.logger.trace("Received ping sending pong")
     var frameData = frame.data
     let maskingKey = frame.maskKey
 
