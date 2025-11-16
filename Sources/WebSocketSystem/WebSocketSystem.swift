@@ -377,7 +377,7 @@ public final class WebSocketSystem: DistributedActorSystem, Sendable {
     }
     self.logger.trace("\(#function) \(String(describing: actor))")
     guard let actor else {
-      self.logger.error("Missing \(type(of: actor))")
+      self.logger.error("Missing \(networkMessage.actorID)")
       self.lockedActors.withLock { actors in
         self.logger.trace("actors: \(actors)")
       }
