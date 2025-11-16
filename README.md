@@ -37,7 +37,7 @@ llvm-cov report .build/debug/butterflyPackageTests.xctest --instr-profile=.build
 ## [Static Linux SDK](https://www.swift.org/documentation/articles/static-linux-getting-started.html)
 
 
-Trying to keep the project able to staticly compile for linux.
+Trying to keep the project able to statically compile for Linux.
 
 ```
 swift build --swift-sdk aarch64-swift-linux-musl
@@ -62,4 +62,6 @@ SSL_CERT_CHAIN_PATH=cert.pem
 SSL_PRIVATE_KEY_PATH=key.pem
 ```
 
-Butterfly uses [swift-configuration](https://github.com/apple/swift-configuration) to load the certs.
+Butterfly uses 
+[swift-configuration](https://github.com/apple/swift-configuration) to load the
+certs.
