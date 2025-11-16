@@ -1,5 +1,4 @@
 import AsyncDNSResolver
-import RegexBuilder
 
 extension String {
   package func resolveToIP() async throws -> String {

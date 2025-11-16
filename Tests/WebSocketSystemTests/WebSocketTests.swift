@@ -1,6 +1,5 @@
 import Distributed
 import Logging
-import RegexBuilder
 import Testing
 
 @testable import WebSocketSystem
