@@ -1,5 +1,5 @@
 enum WebSocketSystemError: Error {
   case message(String)
-  case actorNotFound(Address)
+  case actorNotFound(EntityAddress)
   case invalidMessage
 }
