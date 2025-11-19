@@ -1,5 +1,5 @@
 {
-  "originHash" : "9d68370a31321f40e9ac9150113beb9df087128d11002f26263da44985523650",
+  "originHash" : "c4be1930ea61a6f9179416f5dec7cd0edb883e6dc2ba7ac595ab877c3aaa3306",
   "pins" : [
     {
       "identity" : "git-commit-hash-plugin",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "e7854228bcca130cd1ef7bb4ecb4bdc861db7a68",
         "version" : "0.0.2"
+      }
+    },
+    {
+      "identity" : "swift-async-dns-resolver",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-async-dns-resolver.git",
+      "state" : {
+        "revision" : "08c07ff31a745ee5e522ac10132fb4949834d925",
+        "version" : "0.4.0"
       }
     },
     {
@@ -44,6 +53,15 @@
       "state" : {
         "branch" : "main",
         "revision" : "dee7095f8d8a37a4cd165109768552163aa76458"
+      }
+    },
+    {
+      "identity" : "swift-nio-ssl",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-nio-ssl.git",
+      "state" : {
+        "revision" : "173cc69a058623525a58ae6710e2f5727c663793",
+        "version" : "2.36.0"
       }
     },
     {

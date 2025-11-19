@@ -1,16 +1,28 @@
 # Butterfly
 
-This repo contains two [DistributedActorSystem](https://developer.apple.com/documentation/distributed/distributedactorsystem), and is more a play ground for me to explore and experiment with the language feature and learn about distributed systems.
+This repo contains two 
+[DistributedActorSystem](https://developer.apple.com/documentation/distributed/distributedactorsystem)
+ , and is more a play ground for me to explore and experiment with the language
+feature and learn about distributed systems.
 
-### [Butterfly](Sources/Butterfly) 
+### [Butterfly](Sources/Butterfly)
 
-Currently is a many to many system trying to model nodes in a system, If a node knows the ID/address of an actor on any node it can make remote calls to the actor. 
+Currently is a many to many system trying to model nodes in a system, If a node
+knows the ID/address of an actor on any node it can make remote calls to the 
+actor.
 
 ### [WebSocketSystem](./Sources/WebSocketSystem)
-Is more of a client server setup. Where the server can make calls to the client well the connection is up but the client has to initiate the call.
 
+Is more of a client server setup. Where the server can make calls to the client
+well the connection is up but the client has to initiate the call.
 
 ## Testing
+
+Run the test with SSL enabled
+
+```
+swift test --traits SSL
+```
 
 View test coverage
 
@@ -20,13 +32,36 @@ swift test --enable-code-coverage
 llvm-cov report .build/debug/butterflyPackageTests.xctest --instr-profile=.build/debug/codecov/default.profdata --ignore-filename-regex='(.build|Tests)[/\\].*' 
 ```
 
-# Deployment 
+## Development
 
 ## [Static Linux SDK](https://www.swift.org/documentation/articles/static-linux-getting-started.html)
 
-Trying to keep the project able to staticly compile for linux.
+
+Trying to keep the project able to statically compile for Linux.
 
 ```
 swift build --swift-sdk aarch64-swift-linux-musl
 swift build --swift-sdk x86_64-swift-linux-musl
 ```
+
+## SSL
+
+Generate keys for local testing
+
+```
+openssl req -x509 -newkey rsa:4096 -sha256 -days 365 -nodes \
+  -keyout key.pem -out cert.pem \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:::1"
+```
+
+To configure SSL certificate paths, set the following environment variable:
+
+```
+SSL_CERT_CHAIN_PATH=cert.pem
+SSL_PRIVATE_KEY_PATH=key.pem
+```
+
+Butterfly uses 
+[swift-configuration](https://github.com/apple/swift-configuration) to load the
+certs.

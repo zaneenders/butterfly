@@ -8,20 +8,28 @@ import Testing
 struct WebSocketSystemTests {
   let logLevel: Logger.Level = .error
 
+  @Test func resolve() async throws {
+    let domain = "google.com"
+    let ip = try await domain.resolveToIP()
+    #expect(ip.count > 0)  // TODO: not a great test.
+  }
+
   @Test(.timeLimit(.minutes(1))) func connectDisconnect() async throws {
-    let host = "::1"
-    let port = 7002
+    let host = "127.0.0.1"
+    let port = 7067
+
     let serverSystem = try await WebSocketSystem(
-      .server(host: host, port: port, uri: "/"), logLevel: logLevel
+      .server(makeServerConfig(host: host, port: port)), logLevel: logLevel
     )
     serverSystem.background()
+
+    let clientSystem = try await WebSocketSystem(
+      .client(makeClientConfig(host: host, port: port)), logLevel: logLevel
+    )
+    clientSystem.background()
     // This isn't needed i don't think.
     let server = Backend(actorSystem: serverSystem, logLevel: logLevel)
 
-    let clientSystem = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
-    )
-    clientSystem.background()
     let serverConnection = try Backend.resolve(id: server.id, using: clientSystem)
     let id = try await serverConnection.doWork(69)
     #expect(id == 69)
@@ -39,7 +47,7 @@ struct WebSocketSystemTests {
     }
 
     let clientSystem2 = try await WebSocketSystem(
-      .client(host: host, port: port, uri: "/"), logLevel: logLevel
+      .client(makeClientConfig(host: host, port: port)), logLevel: logLevel
     )
     clientSystem2.background()
     let serverConnection2 = try Backend.resolve(id: server.id, using: clientSystem2)

@@ -11,6 +11,6 @@ extension SocketAddress? {
       logger?.error("Client failed to connect with no IP address.")
       throw WebSocketSystemError.message("Client failed to connect with no IP address.")
     }
-    return WebSocketActorId(host: ip, port: p)
+    return WebSocketActorId(host: ip, port: p, name: "\(#function)")
   }
 }

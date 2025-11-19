@@ -2,6 +2,12 @@ import Logging
 import NIOCore
 import NIOPosix
 
+#if SSL
+import NIOSSL
+import Configuration
+import SystemPackage
+#endif
+
 struct Client: Sendable {
 
   let host: String
@@ -51,10 +57,31 @@ struct Client: Sendable {
     let group: MultiThreadedEventLoopGroup = .singleton
     let bootstrap: NIOAsyncChannel<ButterflyCommand, ButterflyCommand>
     do {
+      #if SSL
+      logger.notice("Using SSL")
+      var tlsConfig = TLSConfiguration.makeClientConfiguration()
+      let config = try await ConfigReader(
+        provider: EnvironmentVariablesProvider(
+          environmentFilePath: ".env",
+        ))
+      if let certPath = config.string(forKey: "SSL_CERT_CHAIN_PATH", as: FilePath.self)?
+        .description
+      {
+        let caCerts = try NIOSSLCertificate.fromPEMFile(certPath)
+        tlsConfig.trustRoots = .certificates(caCerts)
+        tlsConfig.certificateVerification = .fullVerification
+      }
+      let sslContext = try NIOSSLContext(configuration: tlsConfig)
+      #endif
       bootstrap = try await ClientBootstrap(group: group)
         .channelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
         .connect(host: host, port: port) { channel in
           channel.eventLoop.makeCompletedFuture {
+            #if SSL
+            try channel.pipeline.syncOperations.addHandler(
+              try NIOSSLClientHandler(context: sslContext, serverHostname: host)
+            )
+            #endif
             try channel.pipeline.syncOperations.addHandler(
               ByteToMessageHandler(BufferCoder(logger: logger)))
             try channel.pipeline.syncOperations.addHandler(

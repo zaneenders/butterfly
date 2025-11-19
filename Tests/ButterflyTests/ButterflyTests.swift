@@ -22,12 +22,12 @@ struct ButterflyActorSystemInitTests {
     do {
       let (server, laptop) = try await startup(server: 48802, laptop: 48803)
 
-      let serverS = TestScribe(actorSystem: server.system)
-      let serverR = try TestScribe.resolve(id: serverS.id, using: laptop.system)
+      let serverS = TestActor(actorSystem: server.system)
+      let serverR = try TestActor.resolve(id: serverS.id, using: laptop.system)
       #expect(serverS.id == serverR.id)
 
-      let laptopS = TestScribe(actorSystem: laptop.system)
-      let laptopR = try TestScribe.resolve(id: laptopS.id, using: server.system)
+      let laptopS = TestActor(actorSystem: laptop.system)
+      let laptopR = try TestActor.resolve(id: laptopS.id, using: server.system)
       #expect(laptopS.id == laptopR.id)
     } catch {
       Issue.record("\(error)")
@@ -35,14 +35,14 @@ struct ButterflyActorSystemInitTests {
   }
 }
 
-private func getRemotes(server: Int, laptop: Int) async throws -> (TestScribe, TestScribe) {
+private func getRemotes(server: Int, laptop: Int) async throws -> (TestActor, TestActor) {
   let (server, laptop) = try await startup(server: server, laptop: laptop)
 
-  let serverS = TestScribe(actorSystem: server.system)
-  let serverR = try TestScribe.resolve(id: serverS.id, using: laptop.system)
+  let serverS = TestActor(actorSystem: server.system)
+  let serverR = try TestActor.resolve(id: serverS.id, using: laptop.system)
 
-  let laptopS = TestScribe(actorSystem: laptop.system)
-  let laptopR = try TestScribe.resolve(id: laptopS.id, using: server.system)
+  let laptopS = TestActor(actorSystem: laptop.system)
+  let laptopR = try TestActor.resolve(id: laptopS.id, using: server.system)
   return (serverR, laptopR)
 }
 
@@ -122,7 +122,7 @@ struct ButterflyActorSystemMessageTests {
   }
 }
 
-distributed actor TestScribe {
+distributed actor TestActor {
   typealias ActorSystem = ButterflyActorSystem
 
   distributed func speak() {}
@@ -140,14 +140,14 @@ distributed actor TestScribe {
   }
 
   distributed func error() throws {
-    throw TestScribeError.idk("TEST ERROR")
+    throw TestActorError.idk("TEST ERROR")
   }
 
   distributed func errorWithValue() throws -> Int {
-    throw TestScribeError.idk("TEST ERROR")
+    throw TestActorError.idk("TEST ERROR")
   }
 }
 
-enum TestScribeError: Equatable, Codable, Sendable, Error {
+enum TestActorError: Equatable, Codable, Sendable, Error {
   case idk(String)
 }
