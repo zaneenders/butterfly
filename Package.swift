@@ -52,7 +52,6 @@ let package = Package(
         .product(name: "NIOHTTP1", package: "swift-nio"),
         .product(name: "NIOWebSocket", package: "swift-nio"),
         .product(name: "NIOSSL", package: "swift-nio-ssl"),
-        .product(name: "AsyncDNSResolver", package: "swift-async-dns-resolver"),
         .product(name: "SystemPackage", package: "swift-system"),
       ], swiftSettings: swiftSettings,
       plugins: [
@@ -67,6 +66,7 @@ let package = Package(
       name: "WebSocketSystemTests",
       dependencies: [
         "WebSocketSystem",
+        .product(name: "AsyncDNSResolver", package: "swift-async-dns-resolver"),
         .product(
           name: "Configuration", package: "swift-configuration",
           condition: .when(traits: ["SSL"])),
